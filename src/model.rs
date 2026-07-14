@@ -3,20 +3,15 @@
 use serde::{Deserialize, Serialize};
 
 /// What kind of work an agent is doing, inferred from its command line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentKind {
     Render,
     Train,
     Infer,
     Coding,
+    #[default]
     Unknown,
-}
-
-impl Default for AgentKind {
-    fn default() -> Self {
-        AgentKind::Unknown
-    }
 }
 
 /// Semantic state of an agent, derived by the classifier.

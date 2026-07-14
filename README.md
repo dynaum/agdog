@@ -1,8 +1,21 @@
 # agdog
 
+[![CI](https://github.com/dynaum/agdog/actions/workflows/ci.yml/badge.svg)](https://github.com/dynaum/agdog/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 `htop` and `nvitop`, fused and agent-aware. One terminal pane that groups CPU, RAM, GPU, and VRAM by the agent that owns it, and tells you which agent is stuck, runaway, or burning memory.
 
-> Status: early. Design spec in [`docs/superpowers/specs/2026-07-13-agdog-design.md`](docs/superpowers/specs/2026-07-13-agdog-design.md).
+> Status: early, but runnable. Design spec in [`docs/superpowers/specs/2026-07-13-agdog-design.md`](docs/superpowers/specs/2026-07-13-agdog-design.md).
+
+<!-- TODO: replace with an asciinema/GIF of agdog running. -->
+
+## Install
+
+```bash
+# From source (requires Rust 1.85+ for edition 2024):
+git clone https://github.com/dynaum/agdog && cd agdog
+cargo install --path .
+```
 
 ## Why
 

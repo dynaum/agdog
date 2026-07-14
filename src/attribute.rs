@@ -61,14 +61,14 @@ pub fn attribute(
     env_tag: Option<&str>,
 ) -> Attribution {
     // 1. Explicit env tag wins.
-    if let Some(tag) = env_tag {
-        if !tag.is_empty() {
-            return Attribution {
-                agent_id: tag.to_string(),
-                kind: kind_from_cmd(&sample.cmd),
-                confidence: 1.0,
-            };
-        }
+    if let Some(tag) = env_tag
+        && !tag.is_empty()
+    {
+        return Attribution {
+            agent_id: tag.to_string(),
+            kind: kind_from_cmd(&sample.cmd),
+            confidence: 1.0,
+        };
     }
 
     // 2. Cmdline signature.

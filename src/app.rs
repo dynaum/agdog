@@ -409,12 +409,11 @@ pub fn run(interval_secs: u64, rate_per_hour: f64) -> Result<()> {
         loop {
             terminal.draw(|f| ui::render(f, &app))?;
             let timeout = tick_rate.saturating_sub(last_tick.elapsed());
-            if event::poll(timeout)? {
-                if let CEvent::Key(k) = event::read()? {
-                    if k.kind == KeyEventKind::Press {
-                        app.on_key(k.code);
-                    }
-                }
+            if event::poll(timeout)?
+                && let CEvent::Key(k) = event::read()?
+                && k.kind == KeyEventKind::Press
+            {
+                app.on_key(k.code);
             }
             if last_tick.elapsed() >= tick_rate {
                 app.tick();
