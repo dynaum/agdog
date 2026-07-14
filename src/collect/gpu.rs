@@ -27,13 +27,13 @@ pub trait GpuCollector {
 /// tasks; until one initializes successfully we always fall back to the mock,
 /// so the binary runs on any machine.
 pub fn default_gpu_collector() -> Box<dyn GpuCollector> {
-    #[cfg(feature = "nvml")]
+    #[cfg(target_os = "linux")]
     {
         if let Some(nvml) = crate::collect::gpu_nvml::NvmlGpu::try_new() {
             return Box::new(nvml);
         }
     }
-    #[cfg(all(target_os = "macos", feature = "macos"))]
+    #[cfg(target_os = "macos")]
     {
         if let Some(mac) = crate::collect::gpu_macos::MacGpu::try_new() {
             return Box::new(mac);

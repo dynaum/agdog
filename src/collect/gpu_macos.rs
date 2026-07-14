@@ -1,50 +1,23 @@
-//! Apple Silicon GPU backend (feature `macos`).
+//! Apple Silicon GPU backend. Default on macOS, no feature flag, no sudo.
 //!
-//! GPU utilization and power come from `powermetrics` (needs root; degrades to
-//! zeros without it). Unified-memory totals come from `sysinfo`. macOS does not
-//! expose per-process VRAM, so `per_pid` is always empty and attribution groups
-//! by process CPU/memory instead.
+//! GPU utilization comes from the `IOAccelerator` `PerformanceStatistics`
+//! dictionary via `ioreg`, which is readable without root. Unified-memory
+//! totals come from `sysinfo`. macOS does not expose per-process VRAM, so
+//! `per_pid` is always empty and attribution groups by process CPU/memory.
 
 use crate::collect::gpu::{GpuCollector, GpuSample};
 use sysinfo::System;
 
-/// Parse `powermetrics --samplers gpu_power` output into a single GPU sample.
+/// Extract "Device Utilization %" from `ioreg -c IOAccelerator` output.
 /// Pure and sudo-free so it can be unit-tested against captured output.
-pub fn parse_powermetrics(out: &str) -> Vec<GpuSample> {
-    let mut util = 0.0f32;
-    let mut power_w = 0u32;
-    for line in out.lines() {
-        let l = line.trim();
-        if let Some(rest) = l.strip_prefix("GPU HW active residency:") {
-            util = leading_f32(rest);
-        } else if let Some(rest) = l.strip_prefix("GPU Power:") {
-            power_w = leading_u32(rest) / 1000; // mW -> W
-        }
-    }
-    vec![GpuSample {
-        index: 0,
-        util_pct: util,
-        mem_used: 0,
-        mem_total: 0,
-        temp_c: 0,
-        power_w,
-        per_pid: Vec::new(),
-    }]
-}
-
-fn leading_f32(s: &str) -> f32 {
-    let s = s.trim();
-    let num: String = s
+pub fn parse_ioreg_util(out: &str) -> Option<f32> {
+    let key = "\"Device Utilization %\"=";
+    let start = out.find(key)? + key.len();
+    let num: String = out[start..]
         .chars()
         .take_while(|c| c.is_ascii_digit() || *c == '.')
         .collect();
-    num.parse().unwrap_or(0.0)
-}
-
-fn leading_u32(s: &str) -> u32 {
-    let s = s.trim();
-    let num: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
-    num.parse().unwrap_or(0)
+    num.parse().ok()
 }
 
 /// Apple Silicon unified-memory + GPU collector.
@@ -53,14 +26,14 @@ pub struct MacGpu {
 }
 
 impl MacGpu {
-    /// Always available on macOS; GPU util is best-effort (needs root).
+    /// Always available on macOS.
     pub fn try_new() -> Option<Self> {
         Some(Self { sys: System::new() })
     }
 
-    fn run_powermetrics() -> Option<String> {
-        std::process::Command::new("powermetrics")
-            .args(["--samplers", "gpu_power", "-n1", "-i", "200"])
+    fn run_ioreg() -> Option<String> {
+        std::process::Command::new("ioreg")
+            .args(["-r", "-d", "1", "-w", "0", "-c", "IOAccelerator"])
             .output()
             .ok()
             .filter(|o| o.status.success())
@@ -70,18 +43,20 @@ impl MacGpu {
 
 impl GpuCollector for MacGpu {
     fn sample(&mut self) -> Vec<GpuSample> {
-        let mut samples = match Self::run_powermetrics() {
-            Some(out) => parse_powermetrics(&out),
-            None => parse_powermetrics(""),
-        };
+        let util = Self::run_ioreg()
+            .as_deref()
+            .and_then(parse_ioreg_util)
+            .unwrap_or(0.0);
         self.sys.refresh_memory();
-        let total = self.sys.total_memory();
-        let used = self.sys.used_memory();
-        for s in samples.iter_mut() {
-            s.mem_total = total;
-            s.mem_used = used;
-        }
-        samples
+        vec![GpuSample {
+            index: 0,
+            util_pct: util,
+            mem_used: self.sys.used_memory(),
+            mem_total: self.sys.total_memory(),
+            temp_c: 0,
+            power_w: 0,
+            per_pid: Vec::new(),
+        }]
     }
 
     fn name(&self) -> &str {
@@ -93,27 +68,25 @@ impl GpuCollector for MacGpu {
 mod tests {
     use super::*;
 
-    const SAMPLE: &str = "\
-**** GPU usage ****
-
-GPU HW active frequency: 388 MHz
-GPU HW active residency:  45.20% (444 MHz: 12%)
-GPU idle residency:  54.80%
-GPU Power: 1234 mW
-";
-
     #[test]
-    fn parses_util_and_power() {
-        let s = parse_powermetrics(SAMPLE);
-        assert_eq!(s.len(), 1);
-        assert!((s[0].util_pct - 45.20).abs() < 0.01);
-        assert_eq!(s[0].power_w, 1);
+    fn parses_device_utilization() {
+        let s = r#""Renderer Utilization %"=1,"Device Utilization %"=42,"SplitSceneCount"=0"#;
+        assert_eq!(parse_ioreg_util(s), Some(42.0));
     }
 
     #[test]
-    fn empty_input_yields_zeros() {
-        let s = parse_powermetrics("");
-        assert_eq!(s.len(), 1);
-        assert_eq!(s[0].util_pct, 0.0);
+    fn missing_key_returns_none() {
+        assert_eq!(parse_ioreg_util("no stats here"), None);
+    }
+
+    #[test]
+    fn live_backend_reports_sane_values() {
+        // Exercises real ioreg on the macOS build (no sudo needed).
+        if let Some(mut g) = MacGpu::try_new() {
+            let s = g.sample();
+            assert_eq!(s.len(), 1);
+            assert!((0.0..=100.0).contains(&s[0].util_pct));
+            assert!(s[0].mem_total > 0);
+        }
     }
 }

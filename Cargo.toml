@@ -1,6 +1,6 @@
 [package]
 name = "agdog"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Agent-aware terminal resource monitor: htop and nvitop fused, grouped by the agent that owns each process."
 license = "MIT"
@@ -16,11 +16,7 @@ serde_json = "1"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 
-[dependencies.nvml-wrapper]
-version = "0.10"
-optional = true
-
-[features]
-default = []
-nvml = ["dep:nvml-wrapper"]
-macos = []
+# NVIDIA backend ships by default on Linux; it loads the driver at runtime and
+# falls back to the mock when no device is present. Not pulled in on macOS.
+[target.'cfg(target_os = "linux")'.dependencies]
+nvml-wrapper = "0.10"

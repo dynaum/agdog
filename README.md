@@ -61,12 +61,11 @@ Prebuilt binaries for macOS (arm64 and x86_64) and Linux are attached to every [
 agdog
 ```
 
-That runs today on any machine: real process, CPU, and memory metrics, with a mock GPU backend so the view is always alive. Build with a real GPU backend when you want live device data:
+That's it. agdog detects your machine and shows **real numbers automatically**, no flags, no sudo:
 
-```bash
-cargo install --git https://github.com/dynaum/agdog --features nvml    # NVIDIA (Linux)
-cargo install --git https://github.com/dynaum/agdog --features macos   # Apple Silicon
-```
+- **Mac** — live GPU utilization and unified memory via IOKit.
+- **Linux with an NVIDIA GPU** — per-process VRAM and utilization via NVML.
+- **Anywhere else** — a mock GPU keeps the view alive so the tool still runs.
 
 ## Usage
 
@@ -106,13 +105,13 @@ $ agdog watch
 
 ## Backends
 
-| Backend      | Feature flag        | What you get |
-|--------------|---------------------|--------------|
-| Mock         | *(default)*         | Deterministic fake GPUs so the binary runs anywhere. |
-| NVIDIA       | `--features nvml`   | Per-process VRAM and utilization via NVML (runtime driver load). |
-| Apple Silicon| `--features macos`  | Unified-memory totals via sysinfo, GPU utilization via `powermetrics` (needs sudo). |
+| Backend       | Selected on      | What you get |
+|---------------|------------------|--------------|
+| Apple Silicon | macOS (auto)     | GPU utilization via IOKit `ioreg` + unified memory via sysinfo. No sudo. |
+| NVIDIA        | Linux (auto)     | Per-process VRAM and utilization via NVML (runtime driver load). |
+| Mock          | fallback         | Deterministic fake GPUs when no real backend is present. |
 
-Every backend falls back to the mock when its hardware is absent, so agdog always runs.
+The backend is chosen by your OS at build time and falls back to the mock when the hardware is absent, so agdog always runs and always shows the right numbers for the host.
 
 ## Status
 

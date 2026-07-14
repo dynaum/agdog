@@ -41,7 +41,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_one(frame: &mut Frame, area: Rect, g: &GpuSample) {
-    let title = format!(" GPU {} · {}°C {}W ", g.index, g.temp_c, g.power_w);
+    let title = if g.temp_c == 0 && g.power_w == 0 {
+        format!(" GPU {} ", g.index)
+    } else {
+        format!(" GPU {} · {}°C {}W ", g.index, g.temp_c, g.power_w)
+    };
     let block = Block::default().borders(Borders::ALL).title(title);
     let inner = block.inner(area);
     frame.render_widget(block, area);
