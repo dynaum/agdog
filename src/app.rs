@@ -40,6 +40,8 @@ pub struct App {
     pub summary: Summary,
     /// Latest per-process samples from the system collector.
     pub samples: Vec<ResourceSample>,
+    /// Latest per-device GPU samples.
+    pub gpus: Vec<GpuSample>,
     env_tags: HashMap<u32, String>,
     gpu: Box<dyn GpuCollector>,
     system: SystemCollector,
@@ -56,6 +58,7 @@ impl App {
             quit: false,
             summary: Summary::default(),
             samples: Vec::new(),
+            gpus: Vec::new(),
             env_tags: HashMap::new(),
             gpu: default_gpu_collector(),
             system: SystemCollector::new(),
@@ -138,6 +141,7 @@ impl App {
         );
         self.emit_events(&prev);
         self.samples = samples;
+        self.gpus = gpu_samples;
 
         if !self.agents.is_empty() && self.selected >= self.agents.len() {
             self.selected = self.agents.len() - 1;

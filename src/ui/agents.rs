@@ -76,3 +76,17 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     frame.render_widget(table, area);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn state_colors_are_distinct_per_state() {
+        assert_eq!(state_color(AgentState::Working), Color::Green);
+        assert_eq!(state_color(AgentState::Idle), Color::Gray);
+        assert_eq!(state_color(AgentState::Stuck), Color::Yellow);
+        assert_eq!(state_color(AgentState::Runaway), Color::Red);
+        assert_eq!(state_color(AgentState::Crashed), Color::Magenta);
+    }
+}
