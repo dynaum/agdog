@@ -11,6 +11,5 @@ mod socket;
 mod ui;
 
 fn main() -> anyhow::Result<()> {
-    println!("agdog skeleton");
-    Ok(())
+    app::run()
 }
