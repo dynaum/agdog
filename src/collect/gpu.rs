@@ -33,5 +33,11 @@ pub fn default_gpu_collector() -> Box<dyn GpuCollector> {
             return Box::new(nvml);
         }
     }
+    #[cfg(all(target_os = "macos", feature = "macos"))]
+    {
+        if let Some(mac) = crate::collect::gpu_macos::MacGpu::try_new() {
+            return Box::new(mac);
+        }
+    }
     Box::new(MockGpu::new())
 }

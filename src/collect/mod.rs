@@ -6,3 +6,6 @@ pub mod system;
 
 #[cfg(feature = "nvml")]
 pub mod gpu_nvml;
+
+#[cfg(all(target_os = "macos", feature = "macos"))]
+pub mod gpu_macos;
