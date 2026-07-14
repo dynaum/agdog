@@ -4,7 +4,8 @@ use crate::attribute::attribute;
 use crate::classify::classify;
 use crate::collect::gpu::{GpuCollector, GpuSample, default_gpu_collector};
 use crate::collect::system::SystemCollector;
-use crate::model::{Agent, AgentKind, AgentState, ResourceSample};
+use crate::model::{Agent, AgentKind, AgentState, Event, EventKind, ResourceSample};
+use crate::socket::{EventServer, socket_path};
 use crate::ui;
 use anyhow::Result;
 use crossterm::event::{self, Event as CEvent, KeyCode, KeyEventKind};
@@ -14,7 +15,7 @@ use crossterm::terminal::{
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::stdout;
 use std::time::{Duration, Instant};
 
@@ -42,6 +43,8 @@ pub struct App {
     env_tags: HashMap<u32, String>,
     gpu: Box<dyn GpuCollector>,
     system: SystemCollector,
+    /// Event broadcaster; None in tests and until `run` starts it.
+    pub server: Option<EventServer>,
     tick_count: u64,
 }
 
@@ -56,7 +59,48 @@ impl App {
             env_tags: HashMap::new(),
             gpu: default_gpu_collector(),
             system: SystemCollector::new(),
+            server: None,
             tick_count: 0,
+        }
+    }
+
+    /// Diff the previous and current agent sets and broadcast lifecycle events.
+    fn emit_events(&self, prev: &[Agent]) {
+        let Some(server) = &self.server else {
+            return;
+        };
+        let prev_states: HashMap<&str, AgentState> =
+            prev.iter().map(|a| (a.id.as_str(), a.state)).collect();
+        for a in &self.agents {
+            match prev_states.get(a.id.as_str()) {
+                None => server.broadcast(&Event {
+                    kind: EventKind::Started,
+                    agent_id: a.id.clone(),
+                    from: None,
+                    to: a.state,
+                    ts_secs: self.tick_count,
+                }),
+                Some(&ps) if ps != a.state => server.broadcast(&Event {
+                    kind: EventKind::StateChanged,
+                    agent_id: a.id.clone(),
+                    from: Some(ps),
+                    to: a.state,
+                    ts_secs: self.tick_count,
+                }),
+                _ => {}
+            }
+        }
+        let now_ids: HashSet<&str> = self.agents.iter().map(|a| a.id.as_str()).collect();
+        for p in prev {
+            if !now_ids.contains(p.id.as_str()) {
+                server.broadcast(&Event {
+                    kind: EventKind::Exited,
+                    agent_id: p.id.clone(),
+                    from: Some(p.state),
+                    to: AgentState::Crashed,
+                    ts_secs: self.tick_count,
+                });
+            }
         }
     }
 
@@ -92,6 +136,7 @@ impl App {
             self.system.total_mem(),
             &gpu_samples,
         );
+        self.emit_events(&prev);
         self.samples = samples;
 
         if !self.agents.is_empty() && self.selected >= self.agents.len() {
@@ -222,6 +267,7 @@ pub fn run() -> Result<()> {
     let backend = CrosstermBackend::new(out);
     let mut terminal = Terminal::new(backend)?;
     let mut app = App::new();
+    app.server = EventServer::start(socket_path()).ok();
     app.tick();
 
     let tick_rate = Duration::from_secs(1);
