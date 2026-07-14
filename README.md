@@ -39,21 +39,33 @@ agdog reads your real processes, groups them by the agent that spawned them, and
 
 State colors tell the story at a glance: 🟢 working · ⚪ idle · 🟡 stuck · 🔴 runaway · 🟣 crashed.
 
+## Install
+
+**Homebrew** (macOS and Linux):
+
+```bash
+brew install dynaum/tap/agdog
+```
+
+**From source** (requires Rust 1.85+ for edition 2024):
+
+```bash
+cargo install --git https://github.com/dynaum/agdog
+```
+
+Prebuilt binaries for macOS (arm64 and x86_64) and Linux are attached to every [release](https://github.com/dynaum/agdog/releases).
+
 ## Quick start
 
 ```bash
-# Requires Rust 1.85+ (edition 2024)
-git clone https://github.com/dynaum/agdog && cd agdog
-cargo install --path .
-
 agdog
 ```
 
-That runs today on any machine: real process, CPU, and memory metrics, with a mock GPU backend so the view is always alive. Add a real GPU backend when you want live device data:
+That runs today on any machine: real process, CPU, and memory metrics, with a mock GPU backend so the view is always alive. Build with a real GPU backend when you want live device data:
 
 ```bash
-cargo install --path . --features nvml     # NVIDIA (Linux)
-cargo install --path . --features macos    # Apple Silicon
+cargo install --git https://github.com/dynaum/agdog --features nvml    # NVIDIA (Linux)
+cargo install --git https://github.com/dynaum/agdog --features macos   # Apple Silicon
 ```
 
 ## Usage
