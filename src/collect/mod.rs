@@ -3,3 +3,6 @@
 pub mod gpu;
 pub mod gpu_mock;
 pub mod system;
+
+#[cfg(feature = "nvml")]
+pub mod gpu_nvml;
