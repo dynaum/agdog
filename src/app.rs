@@ -1,7 +1,8 @@
 //! Application state and the tick/event loop.
 
 use crate::collect::gpu::{GpuCollector, default_gpu_collector};
-use crate::model::{Agent, AgentKind, AgentState};
+use crate::collect::system::SystemCollector;
+use crate::model::{Agent, AgentKind, AgentState, ResourceSample};
 use crate::ui;
 use anyhow::Result;
 use crossterm::event::{self, Event as CEvent, KeyCode, KeyEventKind};
@@ -19,7 +20,10 @@ pub struct App {
     pub agents: Vec<Agent>,
     pub selected: usize,
     pub quit: bool,
+    /// Latest per-process samples from the system collector (grouped in Task 8).
+    pub samples: Vec<ResourceSample>,
     gpu: Box<dyn GpuCollector>,
+    system: SystemCollector,
     tick_count: u64,
 }
 
@@ -29,14 +33,17 @@ impl App {
             agents: seed_agents(),
             selected: 0,
             quit: false,
+            samples: Vec::new(),
             gpu: default_gpu_collector(),
+            system: SystemCollector::new(),
             tick_count: 0,
         }
     }
 
-    /// Advance one tick: refresh live values from the GPU backend.
+    /// Advance one tick: refresh real process samples and live GPU values.
     pub fn tick(&mut self) {
         self.tick_count = self.tick_count.wrapping_add(1);
+        self.samples = self.system.sample();
         let samples = self.gpu.sample();
         for (a, s) in self.agents.iter_mut().zip(samples.iter().cycle()) {
             a.gpu_pct = s.util_pct;
@@ -191,5 +198,13 @@ mod tests {
         let mut app = App::new();
         app.tick();
         assert!(app.agents.iter().all(|a| !a.history.is_empty()));
+    }
+
+    #[test]
+    fn tick_collects_real_process_samples() {
+        let mut app = App::new();
+        app.tick();
+        assert!(!app.samples.is_empty());
+        assert!(app.samples.iter().any(|s| s.pid == std::process::id()));
     }
 }
