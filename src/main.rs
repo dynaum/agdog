@@ -4,6 +4,14 @@ use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(version, about)]
 struct Cli {
+    /// Refresh interval in seconds.
+    #[arg(long, default_value_t = 1)]
+    interval: u64,
+
+    /// GPU cost rate in dollars per hour, used to derive per-agent cost.
+    #[arg(long, default_value_t = 0.0)]
+    gpu_hourly: f64,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -21,6 +29,6 @@ fn main() -> anyhow::Result<()> {
             agdog::socket::watch(agdog::socket::socket_path())?;
             Ok(())
         }
-        None => agdog::app::run(),
+        None => agdog::app::run(cli.interval, cli.gpu_hourly),
     }
 }

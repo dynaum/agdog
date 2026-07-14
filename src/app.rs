@@ -32,16 +32,81 @@ pub struct Summary {
     pub total_mem: u64,
 }
 
+/// Column the agents table is sorted by; cycled with `s`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SortKey {
+    #[default]
+    Gpu,
+    Cpu,
+    Mem,
+    Cost,
+    Name,
+}
+
+impl SortKey {
+    /// The next key in the cycle.
+    pub fn next(self) -> Self {
+        match self {
+            SortKey::Gpu => SortKey::Cpu,
+            SortKey::Cpu => SortKey::Mem,
+            SortKey::Mem => SortKey::Cost,
+            SortKey::Cost => SortKey::Name,
+            SortKey::Name => SortKey::Gpu,
+        }
+    }
+
+    /// Short label for the footer.
+    pub fn label(self) -> &'static str {
+        match self {
+            SortKey::Gpu => "gpu",
+            SortKey::Cpu => "cpu",
+            SortKey::Mem => "mem",
+            SortKey::Cost => "cost",
+            SortKey::Name => "name",
+        }
+    }
+}
+
+/// Cost of `gpu_secs` seconds of GPU time at `rate_per_hour` dollars/hour.
+pub fn cost_for(gpu_secs: u64, rate_per_hour: f64) -> f64 {
+    gpu_secs as f64 / 3600.0 * rate_per_hour
+}
+
+/// Sort agents in place by the given key (descending for metrics, A-Z for name).
+pub fn sort_agents(agents: &mut [Agent], key: SortKey) {
+    use std::cmp::Ordering;
+    agents.sort_by(|a, b| match key {
+        SortKey::Gpu => b.gpu_pct.partial_cmp(&a.gpu_pct).unwrap_or(Ordering::Equal),
+        SortKey::Cpu => b.cpu_pct.partial_cmp(&a.cpu_pct).unwrap_or(Ordering::Equal),
+        SortKey::Mem => b.mem_bytes.cmp(&a.mem_bytes),
+        SortKey::Cost => b
+            .cost_usd
+            .partial_cmp(&a.cost_usd)
+            .unwrap_or(Ordering::Equal),
+        SortKey::Name => a.id.cmp(&b.id),
+    });
+}
+
 /// Top-level application state.
 pub struct App {
+    /// Filtered, sorted view shown in the table and used for selection.
     pub agents: Vec<Agent>,
+    /// Full unfiltered agent set (summary and events are computed over this).
+    pub all_agents: Vec<Agent>,
     pub selected: usize,
     pub quit: bool,
     pub summary: Summary,
+    pub sort: SortKey,
+    pub filter: String,
+    pub filtering: bool,
     /// Latest per-process samples from the system collector.
     pub samples: Vec<ResourceSample>,
     /// Latest per-device GPU samples.
     pub gpus: Vec<GpuSample>,
+    /// Seconds per tick (from `--interval`).
+    pub interval: u64,
+    /// GPU cost rate in dollars per hour (from `--gpu-hourly`).
+    pub rate_per_hour: f64,
     env_tags: HashMap<u32, String>,
     gpu: Box<dyn GpuCollector>,
     system: SystemCollector,
@@ -54,11 +119,17 @@ impl App {
     pub fn new() -> Self {
         Self {
             agents: Vec::new(),
+            all_agents: Vec::new(),
             selected: 0,
             quit: false,
             summary: Summary::default(),
+            sort: SortKey::default(),
+            filter: String::new(),
+            filtering: false,
             samples: Vec::new(),
             gpus: Vec::new(),
+            interval: 1,
+            rate_per_hour: 0.0,
             env_tags: HashMap::new(),
             gpu: default_gpu_collector(),
             system: SystemCollector::new(),
@@ -67,14 +138,34 @@ impl App {
         }
     }
 
-    /// Diff the previous and current agent sets and broadcast lifecycle events.
-    fn emit_events(&self, prev: &[Agent]) {
+    /// Rebuild the visible `agents` from `all_agents` applying the current
+    /// filter and sort. Cheap; called on tick and on key changes.
+    fn refresh_view(&mut self) {
+        let mut v: Vec<Agent> = if self.filter.is_empty() {
+            self.all_agents.clone()
+        } else {
+            let f = self.filter.to_lowercase();
+            self.all_agents
+                .iter()
+                .filter(|a| a.id.to_lowercase().contains(&f))
+                .cloned()
+                .collect()
+        };
+        sort_agents(&mut v, self.sort);
+        self.agents = v;
+        if !self.agents.is_empty() && self.selected >= self.agents.len() {
+            self.selected = self.agents.len() - 1;
+        }
+    }
+
+    /// Diff the previous and current full agent sets and broadcast events.
+    fn emit_events_over(&self, prev: &[Agent]) {
         let Some(server) = &self.server else {
             return;
         };
         let prev_states: HashMap<&str, AgentState> =
             prev.iter().map(|a| (a.id.as_str(), a.state)).collect();
-        for a in &self.agents {
+        for a in &self.all_agents {
             match prev_states.get(a.id.as_str()) {
                 None => server.broadcast(&Event {
                     kind: EventKind::Started,
@@ -93,7 +184,7 @@ impl App {
                 _ => {}
             }
         }
-        let now_ids: HashSet<&str> = self.agents.iter().map(|a| a.id.as_str()).collect();
+        let now_ids: HashSet<&str> = self.all_agents.iter().map(|a| a.id.as_str()).collect();
         for p in prev {
             if !now_ids.contains(p.id.as_str()) {
                 server.broadcast(&Event {
@@ -131,27 +222,54 @@ impl App {
             }
         }
 
-        let prev = std::mem::take(&mut self.agents);
-        self.agents = build_agents(&samples, &prev, &self.env_tags, 1);
+        let prev = std::mem::take(&mut self.all_agents);
+        self.all_agents = build_agents(
+            &samples,
+            &prev,
+            &self.env_tags,
+            self.interval,
+            self.rate_per_hour,
+        );
         self.summary = summarize(
-            &self.agents,
+            &self.all_agents,
             self.system.total_cpu_pct(),
             self.system.total_mem(),
             &gpu_samples,
         );
-        self.emit_events(&prev);
+        self.emit_events_over(&prev);
         self.samples = samples;
         self.gpus = gpu_samples;
-
-        if !self.agents.is_empty() && self.selected >= self.agents.len() {
-            self.selected = self.agents.len() - 1;
-        }
+        self.refresh_view();
     }
 
     /// Handle one key press.
     pub fn on_key(&mut self, key: KeyCode) {
+        if self.filtering {
+            match key {
+                KeyCode::Char(c) => {
+                    self.filter.push(c);
+                    self.refresh_view();
+                }
+                KeyCode::Backspace => {
+                    self.filter.pop();
+                    self.refresh_view();
+                }
+                KeyCode::Enter | KeyCode::Esc => self.filtering = false,
+                _ => {}
+            }
+            return;
+        }
         match key {
             KeyCode::Char('q') => self.quit = true,
+            KeyCode::Char('s') => {
+                self.sort = self.sort.next();
+                self.refresh_view();
+            }
+            KeyCode::Char('/') => {
+                self.filtering = true;
+                self.filter.clear();
+                self.refresh_view();
+            }
             KeyCode::Down => {
                 if self.selected + 1 < self.agents.len() {
                     self.selected += 1;
@@ -178,6 +296,7 @@ pub fn build_agents(
     prev: &[Agent],
     env_tags: &HashMap<u32, String>,
     tick_secs: u64,
+    rate_per_hour: f64,
 ) -> Vec<Agent> {
     let by_pid: HashMap<u32, ResourceSample> = samples.iter().map(|s| (s.pid, s.clone())).collect();
     let prev_by_id: HashMap<&str, &Agent> = prev.iter().map(|a| (a.id.as_str(), a)).collect();
@@ -217,6 +336,13 @@ pub fn build_agents(
                 _ => 0,
             };
             a.state = new_state;
+            let prev_cost = prev_agent.map(|p| p.cost_usd).unwrap_or(0.0);
+            a.cost_usd = prev_cost
+                + if a.gpu_pct > 5.0 {
+                    cost_for(tick_secs, rate_per_hour)
+                } else {
+                    0.0
+                };
             if let Some(p) = prev_agent {
                 a.history = p.history.clone();
             }
@@ -264,17 +390,19 @@ pub fn summarize(agents: &[Agent], cpu: f32, mem: (u64, u64), gpus: &[GpuSample]
 }
 
 /// Run the terminal UI loop until the user quits. Restores the terminal on exit.
-pub fn run() -> Result<()> {
+pub fn run(interval_secs: u64, rate_per_hour: f64) -> Result<()> {
     enable_raw_mode()?;
     let mut out = stdout();
     execute!(out, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(out);
     let mut terminal = Terminal::new(backend)?;
     let mut app = App::new();
+    app.interval = interval_secs.max(1);
+    app.rate_per_hour = rate_per_hour;
     app.server = EventServer::start(socket_path()).ok();
     app.tick();
 
-    let tick_rate = Duration::from_secs(1);
+    let tick_rate = Duration::from_secs(app.interval);
     let mut last_tick = Instant::now();
 
     let res = (|| -> Result<()> {
@@ -328,7 +456,39 @@ mod tests {
     fn tick_builds_agents_and_summary() {
         let mut app = App::new();
         app.tick();
+        assert!(!app.all_agents.is_empty());
         assert!(!app.agents.is_empty());
         assert!(app.summary.total_mem > 0);
+    }
+
+    #[test]
+    fn cost_for_scales_with_time_and_rate() {
+        assert!((cost_for(3600, 2.0) - 2.0).abs() < 1e-9);
+        assert!((cost_for(1800, 2.0) - 1.0).abs() < 1e-9);
+        assert_eq!(cost_for(1000, 0.0), 0.0);
+    }
+
+    #[test]
+    fn sort_agents_orders_by_key() {
+        let mut v = vec![
+            Agent {
+                id: "b".into(),
+                cpu_pct: 10.0,
+                gpu_pct: 5.0,
+                ..Default::default()
+            },
+            Agent {
+                id: "a".into(),
+                cpu_pct: 90.0,
+                gpu_pct: 1.0,
+                ..Default::default()
+            },
+        ];
+        sort_agents(&mut v, SortKey::Cpu);
+        assert_eq!(v[0].id, "a");
+        sort_agents(&mut v, SortKey::Name);
+        assert_eq!(v[0].id, "a");
+        sort_agents(&mut v, SortKey::Gpu);
+        assert_eq!(v[0].id, "b");
     }
 }

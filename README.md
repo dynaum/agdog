@@ -16,10 +16,29 @@ Run local AI work (ComfyUI renders, a kohya_ss LoRA run, two Ollama models) and 
 - Tracks per-agent GPU-time, peak memory, and cost.
 - Streams state-change events over a Unix socket so orchestrators can react.
 
+## Usage
+
+```bash
+agdog                      # live monitor (mock GPU by default)
+agdog --interval 2         # refresh every 2 seconds
+agdog --gpu-hourly 2.50    # derive per-agent cost at $2.50/GPU-hour
+agdog watch                # subscribe to the event socket, print JSON events
+```
+
+In the TUI: `q` quit · `↑↓` select · `s` cycle sort column · `/` filter by agent name.
+
+Build with a real GPU backend:
+
+```bash
+cargo build --release --features nvml    # NVIDIA (Linux)
+cargo build --release --features macos   # Apple Silicon (GPU util needs sudo)
+```
+
 ## Backends
 
-- **Apple Silicon** — unified memory + GPU via IOKit / Metal counters.
-- **NVIDIA** — per-process VRAM + utilization via NVML.
+- **Mock** (default) — deterministic fake GPUs so the binary runs anywhere.
+- **NVIDIA** (`--features nvml`) — per-process VRAM + utilization via NVML.
+- **Apple Silicon** (`--features macos`) — unified memory via sysinfo, GPU util via powermetrics.
 
 ## Stack
 

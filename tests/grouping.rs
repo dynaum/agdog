@@ -22,7 +22,7 @@ fn groups_by_agent_id_and_sums_metrics() {
         s(11, 10, "python comfyui worker", 10.0, 500_000_000),
         s(20, 1, "some random daemon", 1.0, 100_000_000),
     ];
-    let agents = build_agents(&samples, &[], &HashMap::new(), 1);
+    let agents = build_agents(&samples, &[], &HashMap::new(), 1, 0.0);
 
     let comfy = agents
         .iter()
@@ -39,7 +39,7 @@ fn groups_by_agent_id_and_sums_metrics() {
 #[test]
 fn active_group_classifies_working() {
     let samples = vec![s(10, 1, "python comfyui/main.py", 50.0, 1_000_000_000)];
-    let agents = build_agents(&samples, &[], &HashMap::new(), 1);
+    let agents = build_agents(&samples, &[], &HashMap::new(), 1, 0.0);
     let comfy = agents.iter().find(|a| a.id == "comfyui").unwrap();
     assert_eq!(comfy.state, AgentState::Working);
 }
@@ -47,8 +47,8 @@ fn active_group_classifies_working() {
 #[test]
 fn state_persists_across_ticks_and_accumulates_time() {
     let samples = vec![s(10, 1, "python comfyui/main.py", 50.0, 1_000_000_000)];
-    let first = build_agents(&samples, &[], &HashMap::new(), 1);
-    let second = build_agents(&samples, &first, &HashMap::new(), 1);
+    let first = build_agents(&samples, &[], &HashMap::new(), 1, 0.0);
+    let second = build_agents(&samples, &first, &HashMap::new(), 1, 0.0);
     let comfy = second.iter().find(|a| a.id == "comfyui").unwrap();
     assert_eq!(comfy.state, AgentState::Working);
     assert_eq!(comfy.since_secs, 1); // one tick of continuous Working
