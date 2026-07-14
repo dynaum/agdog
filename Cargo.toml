@@ -2,5 +2,25 @@
 name = "agdog"
 version = "0.1.0"
 edition = "2024"
+description = "Agent-aware terminal resource monitor: htop and nvitop fused, grouped by the agent that owns each process."
+license = "MIT"
+repository = "https://github.com/dynaum/agdog"
+readme = "README.md"
 
 [dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+sysinfo = "0.33"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+
+[dependencies.nvml-wrapper]
+version = "0.10"
+optional = true
+
+[features]
+default = []
+nvml = ["dep:nvml-wrapper"]
+macos = []
