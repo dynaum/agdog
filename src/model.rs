@@ -44,6 +44,27 @@ pub struct ResourceSample {
     pub cmd: String,
 }
 
+/// Where a subagent observation came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SubSource {
+    /// A child agent process nested under a parent (via the process tree).
+    #[default]
+    Process,
+    /// A Claude Code Task sidechain read from the session transcript.
+    Transcript,
+    /// Reported by the agent itself over the socket.
+    Socket,
+}
+
+/// A subagent running under a parent agent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SubAgent {
+    pub name: String,
+    pub state: AgentState,
+    pub source: SubSource,
+}
+
 /// An agent: one or more processes grouped by attribution, with folded metrics.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Agent {
@@ -58,6 +79,10 @@ pub struct Agent {
     pub cost_usd: f64,
     pub since_secs: u64,
     pub task: String,
+    /// Working directory of the root process, when known (maps to a transcript).
+    pub cwd: Option<String>,
+    /// Subagents running under this agent.
+    pub subagents: Vec<SubAgent>,
     /// Recent GPU-util samples for the sparkline (oldest first).
     pub history: Vec<f32>,
 }

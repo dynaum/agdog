@@ -71,6 +71,25 @@ fn parallel_sessions_get_distinct_ids_by_cwd() {
 }
 
 #[test]
+fn child_agent_process_nests_as_subagent() {
+    let mut parent = proc(100, 1, "claude", "claude", 5.0, 1_000_000);
+    parent.cwd = Some("/x/dev/main".to_string());
+    let mut child = proc(200, 100, "claude", "claude -p sub", 3.0, 500_000);
+    child.cwd = Some("/x/dev/worker".to_string());
+
+    let agents = build_agents(&[parent, child], &[], &HashMap::new(), 1, 0.0);
+
+    let p = agents
+        .iter()
+        .find(|a| a.id == "claude:main")
+        .expect("parent agent");
+    assert_eq!(p.subagents.len(), 1);
+    assert_eq!(p.subagents[0].name, "claude:worker");
+    // The child is nested, not a separate top-level row.
+    assert!(agents.iter().all(|a| a.id != "claude:worker"));
+}
+
+#[test]
 fn gui_and_system_processes_never_become_agents() {
     let samples = vec![
         proc(

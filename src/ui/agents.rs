@@ -23,18 +23,32 @@ fn lower(v: impl std::fmt::Debug) -> String {
     format!("{v:?}").to_lowercase()
 }
 
+/// A fixed-width block bar for `frac` in 0..=1.
+fn bar(frac: f32, width: usize) -> String {
+    let filled = (frac.clamp(0.0, 1.0) * width as f32).round() as usize;
+    (0..width)
+        .map(|i| if i < filled { '█' } else { '░' })
+        .collect()
+}
+
+/// A CPU cell: a bar relative to the busiest agent, plus the raw percentage.
+fn cpu_cell(cpu: f32, max: f32) -> String {
+    format!("{} {:>3.0}%", bar(cpu / max, 8), cpu)
+}
+
 /// Render the agents table into `area`, highlighting the selected row.
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     // Columns, with the sort key they map to (if any). The active sort column
     // gets a ▾ marker and a highlight so it's obvious what's being sorted.
-    let cols: [(&str, Option<SortKey>); 9] = [
+    let cols: [(&str, Option<SortKey>); 10] = [
         ("AGENT", Some(SortKey::Name)),
         ("KIND", None),
         ("GPU%", Some(SortKey::Gpu)),
         ("VRAM", None),
-        ("CPU%", Some(SortKey::Cpu)),
+        ("CPU", Some(SortKey::Cpu)),
         ("MEM", Some(SortKey::Mem)),
         ("COST", Some(SortKey::Cost)),
+        ("SUB", None),
         ("STATE", None),
         ("TASK", None),
     ];
@@ -50,44 +64,74 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         }
     }));
 
-    let rows: Vec<Row> = app
-        .agents
-        .iter()
-        .enumerate()
-        .map(|(i, a)| {
-            let base = if i == app.selected {
-                Style::default().add_modifier(Modifier::REVERSED)
-            } else {
-                Style::default()
-            };
+    // CPU bars are relative to the busiest visible agent, so you can see at a
+    // glance which agent is using the most.
+    let max_cpu = app.agents.iter().map(|a| a.cpu_pct).fold(1.0_f32, f32::max);
+
+    let mut rows: Vec<Row> = Vec::new();
+    for (i, a) in app.agents.iter().enumerate() {
+        let base = if i == app.selected {
+            Style::default().add_modifier(Modifier::REVERSED)
+        } else {
+            Style::default()
+        };
+        let sub_count = if a.subagents.is_empty() {
+            String::new()
+        } else {
+            a.subagents.len().to_string()
+        };
+        rows.push(
             Row::new(vec![
                 Cell::from(a.id.clone()),
                 Cell::from(lower(a.kind)),
                 Cell::from(format!("{:.0}", a.gpu_pct)),
                 Cell::from(format!("{:.1}G", a.vram_bytes as f64 / 1e9)),
-                Cell::from(format!("{:.0}", a.cpu_pct)),
+                Cell::from(cpu_cell(a.cpu_pct, max_cpu)),
                 Cell::from(format!("{:.1}G", a.mem_bytes as f64 / 1e9)),
                 Cell::from(format!("${:.2}", a.cost_usd)),
+                Cell::from(sub_count),
                 Cell::from(Text::styled(
                     lower(a.state),
                     Style::default().fg(state_color(a.state)),
                 )),
                 Cell::from(a.task.clone()),
             ])
-            .style(base)
-        })
-        .collect();
+            .style(base),
+        );
+        // Nested subagent rows, dimmed and indented.
+        for s in &a.subagents {
+            rows.push(
+                Row::new(vec![
+                    Cell::from(format!("  ↳ {}", s.name)),
+                    Cell::from("sub"),
+                    Cell::from(""),
+                    Cell::from(""),
+                    Cell::from(""),
+                    Cell::from(""),
+                    Cell::from(""),
+                    Cell::from(""),
+                    Cell::from(Text::styled(
+                        lower(s.state),
+                        Style::default().fg(state_color(s.state)),
+                    )),
+                    Cell::from(lower(s.source)),
+                ])
+                .style(Style::default().fg(Color::DarkGray)),
+            );
+        }
+    }
 
     let widths = [
         Constraint::Length(18),
+        Constraint::Length(6),
+        Constraint::Length(5),
         Constraint::Length(7),
-        Constraint::Length(6),
+        Constraint::Length(14),
         Constraint::Length(8),
-        Constraint::Length(6),
-        Constraint::Length(8),
-        Constraint::Length(8),
+        Constraint::Length(7),
+        Constraint::Length(4),
         Constraint::Length(9),
-        Constraint::Min(20),
+        Constraint::Min(15),
     ];
 
     let table = Table::new(rows, widths).header(header).block(

@@ -4,7 +4,9 @@ use crate::attribute::agent_root;
 use crate::classify::classify;
 use crate::collect::gpu::{GpuCollector, GpuSample, default_gpu_collector};
 use crate::collect::system::SystemCollector;
-use crate::model::{Agent, AgentKind, AgentState, Event, EventKind, ResourceSample};
+use crate::model::{
+    Agent, AgentKind, AgentState, Event, EventKind, ResourceSample, SubAgent, SubSource,
+};
 use crate::socket::{EventServer, socket_path};
 use crate::ui;
 use anyhow::Result;
@@ -165,6 +167,26 @@ impl App {
         }
     }
 
+    /// Enrich agents with transcript (Tier 2) and socket-reported (Tier 3) subagents.
+    fn attach_subagents(&mut self) {
+        let reported = self
+            .server
+            .as_ref()
+            .map(|s| s.reported_subagents())
+            .unwrap_or_default();
+        for a in &mut self.all_agents {
+            if a.kind == AgentKind::Coding
+                && let Some(cwd) = a.cwd.clone()
+            {
+                a.subagents
+                    .extend(crate::subagent::subagents_from_transcript(&cwd));
+            }
+            if let Some(subs) = reported.get(&a.id) {
+                a.subagents.extend(subs.iter().cloned());
+            }
+        }
+    }
+
     /// Diff the previous and current full agent sets and broadcast events.
     fn emit_events_over(&self, prev: &[Agent]) {
         let Some(server) = &self.server else {
@@ -237,6 +259,7 @@ impl App {
             self.interval,
             self.rate_per_hour,
         );
+        self.attach_subagents();
         self.summary = summarize(
             &self.all_agents,
             self.system.total_cpu_pct(),
@@ -308,6 +331,16 @@ fn session_label(sample: &ResourceSample) -> String {
         .and_then(|c| c.rsplit('/').find(|s| !s.is_empty()))
         .map(|s| s.to_string())
         .unwrap_or_else(|| sample.pid.to_string())
+}
+
+/// The nearest agent root that is a strict ancestor of `pid`, if any.
+fn find_parent_root(
+    pid: u32,
+    by_pid: &HashMap<u32, ResourceSample>,
+    roots: &HashMap<u32, (AgentKind, String)>,
+) -> Option<u32> {
+    let ppid = by_pid.get(&pid)?.ppid;
+    find_root(ppid, by_pid, roots)
 }
 
 /// Walk `start` and its ancestors; return the pid of the nearest agent root.
@@ -390,9 +423,12 @@ pub fn build_agents(
         entry.mem_bytes += s.rss_bytes;
         entry.vram_bytes += s.vram_bytes;
         entry.gpu_pct = entry.gpu_pct.max(s.gpu_pct);
-        // Prefer the root process's command line as the task label.
+        // Prefer the root process's command line and working directory.
         if is_root || entry.task.is_empty() {
             entry.task = s.cmd.clone();
+        }
+        if is_root {
+            entry.cwd = s.cwd.clone();
         }
     }
 
@@ -424,6 +460,42 @@ pub fn build_agents(
             a
         })
         .collect();
+
+    // Tier 1: nest child agent-root agents under their parent root.
+    let parent_of: HashMap<u32, u32> = roots
+        .keys()
+        .filter_map(|&pid| find_parent_root(pid, &by_pid, &roots).map(|pr| (pid, pr)))
+        .collect();
+    if !parent_of.is_empty() {
+        let mut by_id: HashMap<String, Agent> = out.drain(..).map(|a| (a.id.clone(), a)).collect();
+        for (child_pid, parent_pid) in &parent_of {
+            let (Some(cid), Some(pid_id)) = (
+                root_id.get(child_pid).cloned(),
+                root_id.get(parent_pid).cloned(),
+            ) else {
+                continue;
+            };
+            if cid == pid_id {
+                continue;
+            }
+            if let Some(child) = by_id.remove(&cid) {
+                if let Some(parent) = by_id.get_mut(&pid_id) {
+                    parent.subagents.push(SubAgent {
+                        name: child.id.clone(),
+                        state: child.state,
+                        source: SubSource::Process,
+                    });
+                    parent.cpu_pct += child.cpu_pct;
+                    parent.mem_bytes += child.mem_bytes;
+                    parent.gpu_pct = parent.gpu_pct.max(child.gpu_pct);
+                    parent.pids.extend(child.pids);
+                } else {
+                    by_id.insert(cid, child);
+                }
+            }
+        }
+        out = by_id.into_values().collect();
+    }
 
     sort_agents(&mut out, SortKey::Gpu);
     out
@@ -517,8 +589,20 @@ pub fn dump_agents() -> Result<()> {
             a.pids.len(),
             a.cpu_pct,
             a.mem_bytes as f64 / 1e9,
-            a.task.chars().take(70).collect::<String>(),
+            a.task.chars().take(60).collect::<String>(),
         );
+        for s in &a.subagents {
+            println!(
+                "  ↳ {:<22} {:<7} {:<8} {:>4} {:>5} {:>7}  [{}]",
+                s.name,
+                "sub",
+                format!("{:?}", s.state).to_lowercase(),
+                "",
+                "",
+                "",
+                format!("{:?}", s.source).to_lowercase(),
+            );
+        }
     }
     Ok(())
 }

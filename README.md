@@ -101,6 +101,8 @@ By default the table shows only your agents; press `a` to also show the `unassig
 
 **Classification** watches utilization and hold-time to label each agent `working`, `idle`, `stuck` (memory held with no activity), `runaway` (pegged and sustained), or `crashed`.
 
+**Subagents** nest under their parent agent (a `SUB` count on the parent, indented `↳` rows). agdog finds them three ways: child agent *processes* via the tree, Claude Code Task sidechains read from the session transcript (`isSidechain`), and agents that report their subagents over the socket.
+
 **The socket API** is what makes agdog agent-native, not just a dashboard. agdog exposes a Unix socket that streams state-change events as JSON lines. An orchestrator, or the agents themselves, can subscribe and react to a stuck or runaway job instead of scraping the screen:
 
 ```bash
@@ -126,6 +128,10 @@ Early but complete and runnable. Real process metrics work today; the mock GPU b
 ## Stack
 
 Rust · [ratatui](https://ratatui.rs) · [sysinfo](https://crates.io/crates/sysinfo) · [nvml-wrapper](https://crates.io/crates/nvml-wrapper). Single static binary, no runtime dependencies.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

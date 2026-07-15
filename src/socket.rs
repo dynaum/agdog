@@ -1,6 +1,12 @@
 //! Unix-socket event server and JSON line protocol.
+//!
+//! Outbound: agdog broadcasts one JSON `Event` line per subscriber. Inbound
+//! (Tier 3 subagents): a connected agent may send `Report` lines to tell agdog
+//! about its subagents, e.g. `{"agent_id":"claude:dev","subagents":[...]}`.
 
-use crate::model::Event;
+use crate::model::{Event, SubAgent};
+use serde::Deserialize;
+use std::collections::HashMap;
 use std::io::Write;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
@@ -16,9 +22,20 @@ pub fn socket_path() -> PathBuf {
     dir.join("agdog.sock")
 }
 
-/// Broadcasts events to any connected subscribers over a Unix socket.
+/// An inbound subagent report from an agent.
+#[derive(Debug, Deserialize)]
+struct Report {
+    agent_id: String,
+    #[serde(default)]
+    subagents: Vec<SubAgent>,
+}
+
+type Reported = Arc<Mutex<HashMap<String, Vec<SubAgent>>>>;
+
+/// Broadcasts events to subscribers and collects inbound subagent reports.
 pub struct EventServer {
     subscribers: Arc<Mutex<Vec<UnixStream>>>,
+    reported: Reported,
     path: PathBuf,
 }
 
@@ -28,12 +45,19 @@ impl EventServer {
         let _ = std::fs::remove_file(&path);
         let listener = UnixListener::bind(&path)?;
         let subscribers: Arc<Mutex<Vec<UnixStream>>> = Arc::new(Mutex::new(Vec::new()));
+        let reported: Reported = Arc::new(Mutex::new(HashMap::new()));
         let subs = Arc::clone(&subscribers);
+        let rep = Arc::clone(&reported);
         thread::spawn(move || {
             for stream in listener.incoming() {
                 match stream {
                     Ok(s) => {
                         let _ = s.set_write_timeout(Some(Duration::from_millis(200)));
+                        // Read inbound reports on a clone so writes and reads don't collide.
+                        if let Ok(rs) = s.try_clone() {
+                            let rep2 = Arc::clone(&rep);
+                            thread::spawn(move || read_reports(rs, rep2));
+                        }
                         if let Ok(mut guard) = subs.lock() {
                             guard.push(s);
                         }
@@ -42,7 +66,11 @@ impl EventServer {
                 }
             }
         });
-        Ok(Self { subscribers, path })
+        Ok(Self {
+            subscribers,
+            reported,
+            path,
+        })
     }
 
     /// Write one JSON line per subscriber. Drops any that error or time out,
@@ -62,11 +90,28 @@ impl EventServer {
     pub fn subscriber_count(&self) -> usize {
         self.subscribers.lock().map(|g| g.len()).unwrap_or(0)
     }
+
+    /// Subagents reported by agents over the socket, keyed by agent id.
+    pub fn reported_subagents(&self) -> HashMap<String, Vec<SubAgent>> {
+        self.reported.lock().map(|g| g.clone()).unwrap_or_default()
+    }
 }
 
 impl Drop for EventServer {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn read_reports(stream: UnixStream, reported: Reported) {
+    use std::io::{BufRead, BufReader};
+    let reader = BufReader::new(stream);
+    for line in reader.lines().map_while(Result::ok) {
+        if let Ok(rep) = serde_json::from_str::<Report>(&line)
+            && let Ok(mut g) = reported.lock()
+        {
+            g.insert(rep.agent_id, rep.subagents);
+        }
     }
 }
 

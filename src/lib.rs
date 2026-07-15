@@ -9,4 +9,5 @@ pub mod classify;
 pub mod collect;
 pub mod model;
 pub mod socket;
+pub mod subagent;
 pub mod ui;
