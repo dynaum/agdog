@@ -50,6 +50,9 @@ brew install dynaum/tap/agdog
 **Scoop** (Windows):
 
 ```powershell
+# Install Scoop first if you don't have it:
+irm get.scoop.sh | iex
+
 scoop bucket add dynaum https://github.com/dynaum/scoop-bucket
 scoop install agdog
 ```
