@@ -161,11 +161,15 @@ impl App {
     /// Rebuild the visible `agents` from `all_agents` applying the current
     /// filter and sort. Cheap; called on tick and on key changes.
     fn refresh_view(&mut self) {
+        // With no real agents (a machine not running any agent CLI), fall back to
+        // showing the process list so the table is never mysteriously empty.
+        let has_agents = self.all_agents.iter().any(|a| a.id != "unassigned");
+        let show_all = self.show_unassigned || !has_agents;
         let f = self.filter.to_lowercase();
         let mut v: Vec<Agent> = self
             .all_agents
             .iter()
-            .filter(|a| self.show_unassigned || a.id != "unassigned")
+            .filter(|a| show_all || a.id != "unassigned")
             .filter(|a| f.is_empty() || a.id.to_lowercase().contains(&f))
             .cloned()
             .collect();

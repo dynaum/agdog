@@ -4,6 +4,14 @@ All notable changes to agdog are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and versions follow
 [SemVer](https://semver.org/).
 
+## [0.3.1] - 2026-07-15
+
+### Fixed
+- Empty agents table on a machine with no agent CLIs running. `unassigned`
+  (the process list) now shows automatically when no agents are detected, and
+  a truly empty view shows a hint instead of a blank box. Fixes "no data" on a
+  fresh install.
+
 ## [0.3.0] - 2026-07-15
 
 ### Added

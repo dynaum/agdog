@@ -6,7 +6,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Text;
-use ratatui::widgets::{Block, Borders, Cell, Row, Table};
+use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 
 /// Map a semantic state to its display color (shared with the alerts panel).
 pub fn state_color(state: AgentState) -> Color {
@@ -38,6 +38,22 @@ fn cpu_cell(cpu: f32, max: f32) -> String {
 
 /// Render the agents table into `area`, highlighting the selected row.
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+    // Never show a blank box: if nothing is visible (e.g. a filter matched
+    // nothing), show a hint instead.
+    if app.agents.is_empty() {
+        let hint =
+            "No agents visible.\nPress 'a' to show all processes, or clear the filter with '/'.";
+        let p = Paragraph::new(hint)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" agdog · agents "),
+            )
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(p, area);
+        return;
+    }
+
     // Columns, with the sort key they map to (if any). The active sort column
     // gets a ▾ marker and a highlight so it's obvious what's being sorted.
     let cols: [(&str, Option<SortKey>); 10] = [
