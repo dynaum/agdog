@@ -105,6 +105,8 @@ pub struct App {
     pub sort: SortKey,
     pub filter: String,
     pub filtering: bool,
+    /// Whether the catch-all `unassigned` row is shown (off by default).
+    pub show_unassigned: bool,
     /// Latest per-process samples from the system collector.
     pub samples: Vec<ResourceSample>,
     /// Latest per-device GPU samples.
@@ -132,6 +134,7 @@ impl App {
             sort: SortKey::default(),
             filter: String::new(),
             filtering: false,
+            show_unassigned: false,
             samples: Vec::new(),
             gpus: Vec::new(),
             interval: 1,
@@ -147,16 +150,14 @@ impl App {
     /// Rebuild the visible `agents` from `all_agents` applying the current
     /// filter and sort. Cheap; called on tick and on key changes.
     fn refresh_view(&mut self) {
-        let mut v: Vec<Agent> = if self.filter.is_empty() {
-            self.all_agents.clone()
-        } else {
-            let f = self.filter.to_lowercase();
-            self.all_agents
-                .iter()
-                .filter(|a| a.id.to_lowercase().contains(&f))
-                .cloned()
-                .collect()
-        };
+        let f = self.filter.to_lowercase();
+        let mut v: Vec<Agent> = self
+            .all_agents
+            .iter()
+            .filter(|a| self.show_unassigned || a.id != "unassigned")
+            .filter(|a| f.is_empty() || a.id.to_lowercase().contains(&f))
+            .cloned()
+            .collect();
         sort_agents(&mut v, self.sort);
         self.agents = v;
         if !self.agents.is_empty() && self.selected >= self.agents.len() {
@@ -271,17 +272,21 @@ impl App {
                 self.sort = self.sort.next();
                 self.refresh_view();
             }
+            KeyCode::Char('a') => {
+                self.show_unassigned = !self.show_unassigned;
+                self.refresh_view();
+            }
             KeyCode::Char('/') => {
                 self.filtering = true;
                 self.filter.clear();
                 self.refresh_view();
             }
-            KeyCode::Down => {
+            KeyCode::Down | KeyCode::Char('j') => {
                 if self.selected + 1 < self.agents.len() {
                     self.selected += 1;
                 }
             }
-            KeyCode::Up => {
+            KeyCode::Up | KeyCode::Char('k') => {
                 self.selected = self.selected.saturating_sub(1);
             }
             _ => {}
@@ -433,6 +438,9 @@ pub fn summarize(agents: &[Agent], cpu: f32, mem: (u64, u64), gpus: &[GpuSample]
         ..Default::default()
     };
     for a in agents {
+        if a.id == "unassigned" {
+            continue;
+        }
         match a.state {
             AgentState::Working => s.working += 1,
             AgentState::Idle => s.idle += 1,
@@ -541,6 +549,19 @@ mod tests {
         assert!(!app.all_agents.is_empty());
         assert!(!app.agents.is_empty());
         assert!(app.summary.total_mem > 0);
+    }
+
+    #[test]
+    fn others_hidden_by_default_and_toggle_with_a() {
+        let mut app = App::new();
+        app.tick();
+        assert!(!app.show_unassigned);
+        assert!(app.agents.iter().all(|a| a.id != "unassigned"));
+        app.on_key(KeyCode::Char('a'));
+        assert!(app.show_unassigned);
+        // j/k must never panic regardless of how many agents are visible.
+        app.on_key(KeyCode::Char('j'));
+        app.on_key(KeyCode::Char('k'));
     }
 
     #[test]

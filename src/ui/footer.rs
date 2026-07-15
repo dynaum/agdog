@@ -21,9 +21,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         String::new()
     };
+    let others = if app.show_unassigned { "on" } else { "off" };
     let text = format!(
-        "q quit · ↑↓ select · s sort[{}] · / filter{}     agdog.sock: {subs} subscribers",
+        "q quit · j/k move · s sort[{}] · a others:{} · / filter{}     agdog.sock: {subs} subscribers",
         app.sort.label(),
+        others,
         filt,
     );
     let p = Paragraph::new(Line::from(text)).style(Style::default().fg(Color::DarkGray));

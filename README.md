@@ -81,12 +81,15 @@ agdog identifies agents by their **program name**, not path substrings, so it se
 
 Keys inside the TUI:
 
-| Key   | Action                          |
-|-------|---------------------------------|
-| `q`   | quit                            |
-| `↑ ↓` | select an agent                 |
-| `s`   | cycle sort column (gpu/cpu/mem/cost/name) |
-| `/`   | filter by agent name            |
+| Key       | Action                          |
+|-----------|---------------------------------|
+| `q`       | quit                            |
+| `j` / `k` | select an agent (also `↑` / `↓`) |
+| `s`       | cycle sort column (gpu/cpu/mem/cost/name) |
+| `a`       | show/hide other processes (the `unassigned` row) |
+| `/`       | filter by agent name            |
+
+By default the table shows only your agents; press `a` to also show the `unassigned` row (everything that isn't an agent: the OS, GUI apps, background daemons).
 
 ## How it works
 
