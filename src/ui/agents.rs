@@ -1,6 +1,6 @@
 //! Grouped agents table.
 
-use crate::app::App;
+use crate::app::{App, SortKey};
 use crate::model::AgentState;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
@@ -25,10 +25,30 @@ fn lower(v: impl std::fmt::Debug) -> String {
 
 /// Render the agents table into `area`, highlighting the selected row.
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
-    let header = Row::new(vec![
-        "AGENT", "KIND", "GPU%", "VRAM", "CPU%", "MEM", "STATE", "TASK",
-    ])
-    .style(Style::default().add_modifier(Modifier::BOLD));
+    // Columns, with the sort key they map to (if any). The active sort column
+    // gets a ▾ marker and a highlight so it's obvious what's being sorted.
+    let cols: [(&str, Option<SortKey>); 9] = [
+        ("AGENT", Some(SortKey::Name)),
+        ("KIND", None),
+        ("GPU%", Some(SortKey::Gpu)),
+        ("VRAM", None),
+        ("CPU%", Some(SortKey::Cpu)),
+        ("MEM", Some(SortKey::Mem)),
+        ("COST", Some(SortKey::Cost)),
+        ("STATE", None),
+        ("TASK", None),
+    ];
+    let header = Row::new(cols.iter().map(|(name, key)| {
+        if *key == Some(app.sort) {
+            Cell::from(format!("{name}▾")).style(
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .fg(Color::Cyan),
+            )
+        } else {
+            Cell::from(*name).style(Style::default().add_modifier(Modifier::BOLD))
+        }
+    }));
 
     let rows: Vec<Row> = app
         .agents
@@ -47,6 +67,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 Cell::from(format!("{:.1}G", a.vram_bytes as f64 / 1e9)),
                 Cell::from(format!("{:.0}", a.cpu_pct)),
                 Cell::from(format!("{:.1}G", a.mem_bytes as f64 / 1e9)),
+                Cell::from(format!("${:.2}", a.cost_usd)),
                 Cell::from(Text::styled(
                     lower(a.state),
                     Style::default().fg(state_color(a.state)),
@@ -63,6 +84,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         Constraint::Length(6),
         Constraint::Length(8),
         Constraint::Length(6),
+        Constraint::Length(8),
         Constraint::Length(8),
         Constraint::Length(9),
         Constraint::Min(20),
