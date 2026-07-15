@@ -47,15 +47,13 @@ State colors tell the story at a glance: 🟢 working · ⚪ idle · 🟡 stuck 
 brew install dynaum/tap/agdog
 ```
 
-**Scoop** (Windows):
+**Windows** (one-liner, no prerequisites):
 
 ```powershell
-# Install Scoop first if you don't have it:
-irm get.scoop.sh | iex
-
-scoop bucket add dynaum https://github.com/dynaum/scoop-bucket
-scoop install agdog
+irm https://raw.githubusercontent.com/dynaum/agdog/master/install.ps1 | iex
 ```
+
+Downloads the latest release, installs `agdog.exe` to `%LOCALAPPDATA%\agdog`, and adds it to your PATH.
 
 **From source** (requires Rust 1.85+ for edition 2024):
 
