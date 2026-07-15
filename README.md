@@ -9,7 +9,7 @@ One terminal pane that groups CPU, RAM, GPU, and VRAM by the *agent* that owns e
 [![CI](https://github.com/dynaum/agdog/actions/workflows/ci.yml/badge.svg)](https://github.com/dynaum/agdog/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Rust](https://img.shields.io/badge/rust-edition%202024-orange.svg)
-![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg)
+![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
 
 ![agdog demo](docs/demo.gif)
 
