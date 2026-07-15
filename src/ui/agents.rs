@@ -98,23 +98,40 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             ])
             .style(base),
         );
-        // Nested subagent rows, dimmed and indented.
+        // Nested subagent rows, dimmed and indented. Process subagents carry
+        // real cpu/mem; transcript/socket ones leave those cells blank rather
+        // than show a number they don't have.
         for s in &a.subagents {
+            let cpu = if s.cpu_pct > 0.0 {
+                cpu_cell(s.cpu_pct, max_cpu)
+            } else {
+                String::new()
+            };
+            let mem = if s.mem_bytes > 0 {
+                format!("{:.1}G", s.mem_bytes as f64 / 1e9)
+            } else {
+                String::new()
+            };
+            let task = if s.task.is_empty() {
+                lower(s.source)
+            } else {
+                s.task.clone()
+            };
             rows.push(
                 Row::new(vec![
                     Cell::from(format!("  ↳ {}", s.name)),
                     Cell::from("sub"),
                     Cell::from(""),
                     Cell::from(""),
-                    Cell::from(""),
-                    Cell::from(""),
+                    Cell::from(cpu),
+                    Cell::from(mem),
                     Cell::from(""),
                     Cell::from(""),
                     Cell::from(Text::styled(
                         lower(s.state),
                         Style::default().fg(state_color(s.state)),
                     )),
-                    Cell::from(lower(s.source)),
+                    Cell::from(task),
                 ])
                 .style(Style::default().fg(Color::DarkGray)),
             );

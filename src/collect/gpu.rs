@@ -27,6 +27,10 @@ pub trait GpuCollector {
 /// tasks; until one initializes successfully we always fall back to the mock,
 /// so the binary runs on any machine.
 pub fn default_gpu_collector() -> Box<dyn GpuCollector> {
+    // Demo/screenshot mode forces the mock GPU on any platform.
+    if crate::demo::enabled() {
+        return Box::new(MockGpu::new());
+    }
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     {
         if let Some(nvml) = crate::collect::gpu_nvml::NvmlGpu::try_new() {

@@ -7,6 +7,7 @@ pub mod app;
 pub mod attribute;
 pub mod classify;
 pub mod collect;
+pub mod demo;
 pub mod model;
 pub mod socket;
 pub mod subagent;

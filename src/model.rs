@@ -63,6 +63,15 @@ pub struct SubAgent {
     pub name: String,
     pub state: AgentState,
     pub source: SubSource,
+    /// CPU% attributed to this subagent (process source only; 0 when unknown).
+    #[serde(default)]
+    pub cpu_pct: f32,
+    /// Resident memory attributed to this subagent (0 when unknown).
+    #[serde(default)]
+    pub mem_bytes: u64,
+    /// What the subagent is doing (command line or task label; empty when unknown).
+    #[serde(default)]
+    pub task: String,
 }
 
 /// An agent: one or more processes grouped by attribution, with folded metrics.

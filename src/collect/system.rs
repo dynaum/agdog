@@ -71,6 +71,18 @@ impl SystemCollector {
         self.sys.global_cpu_usage()
     }
 
+    /// Per-core CPU utilization (0-100), one entry per logical core.
+    pub fn cpu_cores(&self) -> Vec<f32> {
+        self.sys.cpus().iter().map(|c| c.cpu_usage()).collect()
+    }
+
+    /// System load average over 1, 5, and 15 minutes. Zeros on platforms that
+    /// don't report it (Windows).
+    pub fn load_average(&self) -> (f64, f64, f64) {
+        let l = System::load_average();
+        (l.one, l.five, l.fifteen)
+    }
+
     /// (used_bytes, total_bytes) of physical memory.
     pub fn total_mem(&self) -> (u64, u64) {
         (self.sys.used_memory(), self.sys.total_memory())
@@ -96,6 +108,18 @@ mod tests {
         assert!(
             samples.iter().any(|s| s.pid == me),
             "current pid {me} not found in samples"
+        );
+    }
+
+    #[test]
+    fn cpu_cores_reports_one_per_logical_core() {
+        let mut c = SystemCollector::new();
+        let _ = c.sample();
+        let cores = c.cpu_cores();
+        assert!(!cores.is_empty(), "expected at least one CPU core");
+        assert!(
+            cores.iter().all(|&u| (0.0..=100.0).contains(&u)),
+            "core usage out of range: {cores:?}"
         );
     }
 

@@ -97,6 +97,9 @@ pub fn parse_inflight(text: &str) -> Vec<SubAgent> {
             name,
             state: AgentState::Working,
             source: SubSource::Transcript,
+            cpu_pct: 0.0,
+            mem_bytes: 0,
+            task: String::new(),
         })
         .collect();
     out.sort_by(|a, b| a.name.cmp(&b.name));

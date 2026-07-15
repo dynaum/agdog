@@ -6,11 +6,11 @@ Output docs/demo.gif
 Set Shell "bash"
 Set FontSize 13
 Set Width 1240
-Set Height 780
+Set Height 860
 Set Padding 12
 Set Theme "Catppuccin Mocha"
 
-Type "./target/release/agdog --gpu-hourly 2.50"
+Type "AGDOG_DEMO=1 ./target/release/agdog --gpu-hourly 2.50"
 Enter
 Sleep 6s
 Type "s"

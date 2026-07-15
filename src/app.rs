@@ -113,6 +113,12 @@ pub struct App {
     pub samples: Vec<ResourceSample>,
     /// Latest per-device GPU samples.
     pub gpus: Vec<GpuSample>,
+    /// Latest per-core CPU utilization (0-100).
+    pub cpu_cores: Vec<f32>,
+    /// System load average over 1 / 5 / 15 minutes.
+    pub cpu_load: (f64, f64, f64),
+    /// Rolling system-wide CPU history for the sparkline (oldest first, max 60).
+    pub cpu_history: Vec<f32>,
     /// Seconds per tick (from `--interval`).
     pub interval: u64,
     /// GPU cost rate in dollars per hour (from `--gpu-hourly`).
@@ -139,6 +145,9 @@ impl App {
             show_unassigned: false,
             samples: Vec::new(),
             gpus: Vec::new(),
+            cpu_cores: Vec::new(),
+            cpu_load: (0.0, 0.0, 0.0),
+            cpu_history: Vec::new(),
             interval: 1,
             rate_per_hour: 0.0,
             env_tags: HashMap::new(),
@@ -233,6 +242,29 @@ impl App {
         self.tick_count = self.tick_count.wrapping_add(1);
 
         let gpu_samples = self.gpu.sample();
+
+        // Demo mode: curated mock agents instead of the real process table.
+        if crate::demo::enabled() {
+            let prev = std::mem::take(&mut self.all_agents);
+            self.all_agents = crate::demo::demo_agents(self.tick_count, &prev);
+            self.summary = summarize(
+                &self.all_agents,
+                crate::demo::DEMO_CPU,
+                (crate::demo::DEMO_USED_MEM, crate::demo::DEMO_TOTAL_MEM),
+                &gpu_samples,
+            );
+            self.emit_events_over(&prev);
+            self.gpus = gpu_samples;
+            self.cpu_cores = crate::demo::demo_cpu_cores(self.tick_count);
+            self.cpu_load = (2.3, 1.8, 1.5);
+            self.cpu_history.push(self.summary.total_cpu);
+            if self.cpu_history.len() > 60 {
+                self.cpu_history.remove(0);
+            }
+            self.refresh_view();
+            return;
+        }
+
         let mut samples = self.system.sample();
 
         // Merge any per-pid GPU data (real backends) into the process samples.
@@ -269,6 +301,12 @@ impl App {
         self.emit_events_over(&prev);
         self.samples = samples;
         self.gpus = gpu_samples;
+        self.cpu_cores = self.system.cpu_cores();
+        self.cpu_load = self.system.load_average();
+        self.cpu_history.push(self.summary.total_cpu);
+        if self.cpu_history.len() > 60 {
+            self.cpu_history.remove(0);
+        }
         self.refresh_view();
     }
 
@@ -484,6 +522,9 @@ pub fn build_agents(
                         name: child.id.clone(),
                         state: child.state,
                         source: SubSource::Process,
+                        cpu_pct: child.cpu_pct,
+                        mem_bytes: child.mem_bytes,
+                        task: child.task.clone(),
                     });
                     parent.cpu_pct += child.cpu_pct;
                     parent.mem_bytes += child.mem_bytes;
