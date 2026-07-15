@@ -42,6 +42,14 @@ impl SystemCollector {
                 } else {
                     parts.join(" ")
                 };
+                // Program name: prefer the executable basename, fall back to the
+                // process name. This is what signatures match against.
+                let exe_name = p
+                    .exe()
+                    .and_then(|e| e.file_name())
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| p.name().to_string_lossy().into_owned());
+                let cwd = p.cwd().map(|c| c.to_string_lossy().into_owned());
                 ResourceSample {
                     pid: p.pid().as_u32(),
                     ppid: p.parent().map(|x| x.as_u32()).unwrap_or(0),
@@ -50,6 +58,8 @@ impl SystemCollector {
                     gpu_pct: 0.0,
                     vram_bytes: 0,
                     gpu_index: None,
+                    exe_name,
+                    cwd,
                     cmd,
                 }
             })

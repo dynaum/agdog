@@ -20,6 +20,8 @@ struct Cli {
 enum Command {
     /// Subscribe to the event socket and print each event as JSON.
     Watch,
+    /// Print the attributed agents once and exit (for debugging attribution).
+    Agents,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -29,6 +31,7 @@ fn main() -> anyhow::Result<()> {
             agdog::socket::watch(agdog::socket::socket_path())?;
             Ok(())
         }
+        Some(Command::Agents) => agdog::app::dump_agents(),
         None => agdog::app::run(cli.interval, cli.gpu_hourly),
     }
 }

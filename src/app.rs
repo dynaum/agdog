@@ -1,6 +1,6 @@
 //! Application state and the tick/event loop.
 
-use crate::attribute::attribute;
+use crate::attribute::agent_root;
 use crate::classify::classify;
 use crate::collect::gpu::{GpuCollector, GpuSample, default_gpu_collector};
 use crate::collect::system::SystemCollector;
@@ -75,15 +75,21 @@ pub fn cost_for(gpu_secs: u64, rate_per_hour: f64) -> f64 {
 /// Sort agents in place by the given key (descending for metrics, A-Z for name).
 pub fn sort_agents(agents: &mut [Agent], key: SortKey) {
     use std::cmp::Ordering;
-    agents.sort_by(|a, b| match key {
-        SortKey::Gpu => b.gpu_pct.partial_cmp(&a.gpu_pct).unwrap_or(Ordering::Equal),
-        SortKey::Cpu => b.cpu_pct.partial_cmp(&a.cpu_pct).unwrap_or(Ordering::Equal),
-        SortKey::Mem => b.mem_bytes.cmp(&a.mem_bytes),
-        SortKey::Cost => b
-            .cost_usd
-            .partial_cmp(&a.cost_usd)
-            .unwrap_or(Ordering::Equal),
-        SortKey::Name => a.id.cmp(&b.id),
+    let is_unassigned = |x: &Agent| x.id == "unassigned";
+    agents.sort_by(|a, b| {
+        // The catch-all bucket always sorts last so real agents stay on top.
+        is_unassigned(a)
+            .cmp(&is_unassigned(b))
+            .then_with(|| match key {
+                SortKey::Gpu => b.gpu_pct.partial_cmp(&a.gpu_pct).unwrap_or(Ordering::Equal),
+                SortKey::Cpu => b.cpu_pct.partial_cmp(&a.cpu_pct).unwrap_or(Ordering::Equal),
+                SortKey::Mem => b.mem_bytes.cmp(&a.mem_bytes),
+                SortKey::Cost => b
+                    .cost_usd
+                    .partial_cmp(&a.cost_usd)
+                    .unwrap_or(Ordering::Equal),
+                SortKey::Name => a.id.cmp(&b.id),
+            })
     });
 }
 
@@ -289,6 +295,38 @@ impl Default for App {
     }
 }
 
+/// A short session label for a root: the working-directory basename, or the pid.
+fn session_label(sample: &ResourceSample) -> String {
+    sample
+        .cwd
+        .as_deref()
+        .and_then(|c| c.rsplit('/').find(|s| !s.is_empty()))
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| sample.pid.to_string())
+}
+
+/// Walk `start` and its ancestors; return the pid of the nearest agent root.
+fn find_root(
+    start: u32,
+    by_pid: &HashMap<u32, ResourceSample>,
+    roots: &HashMap<u32, (AgentKind, String)>,
+) -> Option<u32> {
+    let mut cur = start;
+    let mut hops = 0;
+    loop {
+        if roots.contains_key(&cur) {
+            return Some(cur);
+        }
+        match by_pid.get(&cur) {
+            Some(s) if s.ppid != 0 && s.ppid != cur && hops < 64 => {
+                cur = s.ppid;
+                hops += 1;
+            }
+            _ => return None,
+        }
+    }
+}
+
 /// Fold per-process samples into agents grouped by attribution, classify each
 /// against its previous snapshot, and sort by GPU usage descending.
 pub fn build_agents(
@@ -301,26 +339,54 @@ pub fn build_agents(
     let by_pid: HashMap<u32, ResourceSample> = samples.iter().map(|s| (s.pid, s.clone())).collect();
     let prev_by_id: HashMap<&str, &Agent> = prev.iter().map(|a| (a.id.as_str(), a)).collect();
 
-    let mut groups: HashMap<String, Agent> = HashMap::new();
+    // Pass 1: find agent roots (a process that is itself an agent CLI).
+    let mut roots: HashMap<u32, (AgentKind, String)> = HashMap::new();
     for s in samples {
         let tag = env_tags.get(&s.pid).map(|x| x.as_str());
-        let attr = attribute(s, &by_pid, tag);
-        let entry = groups
-            .entry(attr.agent_id.clone())
-            .or_insert_with(|| Agent {
-                id: attr.agent_id.clone(),
-                kind: attr.kind,
-                ..Default::default()
-            });
-        if entry.kind == AgentKind::Unknown && attr.kind != AgentKind::Unknown {
-            entry.kind = attr.kind;
+        if let Some((kind, tool)) = agent_root(s, tag) {
+            roots.insert(s.pid, (kind, tool));
         }
+    }
+
+    // Add a session discriminator only when a tool has more than one root, so a
+    // lone service stays `ollama` while parallel sessions become `claude:proj`.
+    let mut tool_counts: HashMap<&str, usize> = HashMap::new();
+    for (_, tool) in roots.values() {
+        *tool_counts.entry(tool.as_str()).or_insert(0) += 1;
+    }
+    let root_id: HashMap<u32, String> = roots
+        .iter()
+        .map(|(pid, (_, tool))| {
+            let id = if tool_counts.get(tool.as_str()).copied().unwrap_or(0) > 1 {
+                let label = by_pid.get(pid).map(session_label).unwrap_or_default();
+                format!("{tool}:{label}")
+            } else {
+                tool.clone()
+            };
+            (*pid, id)
+        })
+        .collect();
+
+    // Pass 2: group every process under its owning root, else "unassigned".
+    let mut groups: HashMap<String, Agent> = HashMap::new();
+    for s in samples {
+        let (id, kind) = match find_root(s.pid, &by_pid, &roots) {
+            Some(rp) => (root_id[&rp].clone(), roots[&rp].0),
+            None => ("unassigned".to_string(), AgentKind::Unknown),
+        };
+        let is_root = roots.contains_key(&s.pid);
+        let entry = groups.entry(id.clone()).or_insert_with(|| Agent {
+            id,
+            kind,
+            ..Default::default()
+        });
         entry.pids.push(s.pid);
         entry.cpu_pct += s.cpu_pct;
         entry.mem_bytes += s.rss_bytes;
         entry.vram_bytes += s.vram_bytes;
         entry.gpu_pct = entry.gpu_pct.max(s.gpu_pct);
-        if entry.task.is_empty() {
+        // Prefer the root process's command line as the task label.
+        if is_root || entry.task.is_empty() {
             entry.task = s.cmd.clone();
         }
     }
@@ -354,16 +420,7 @@ pub fn build_agents(
         })
         .collect();
 
-    out.sort_by(|a, b| {
-        b.gpu_pct
-            .partial_cmp(&a.gpu_pct)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| {
-                b.cpu_pct
-                    .partial_cmp(&a.cpu_pct)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-    });
+    sort_agents(&mut out, SortKey::Gpu);
     out
 }
 
@@ -430,6 +487,32 @@ pub fn run(interval_secs: u64, rate_per_hour: f64) -> Result<()> {
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
     res
+}
+
+/// Print the attributed agents once and exit (the `agdog agents` command).
+/// Useful for checking attribution without entering the TUI.
+pub fn dump_agents() -> Result<()> {
+    let mut app = App::new();
+    app.tick();
+    std::thread::sleep(Duration::from_millis(500));
+    app.tick();
+    println!(
+        "{:<26} {:<7} {:<8} {:>4} {:>6} {:>8}  task",
+        "AGENT", "KIND", "STATE", "PROC", "CPU%", "MEM"
+    );
+    for a in &app.all_agents {
+        println!(
+            "{:<26} {:<7} {:<8} {:>4} {:>5.0}% {:>7.1}G  {}",
+            a.id,
+            format!("{:?}", a.kind).to_lowercase(),
+            format!("{:?}", a.state).to_lowercase(),
+            a.pids.len(),
+            a.cpu_pct,
+            a.mem_bytes as f64 / 1e9,
+            a.task.chars().take(70).collect::<String>(),
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]

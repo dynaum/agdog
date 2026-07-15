@@ -27,7 +27,7 @@ pub enum AgentState {
 }
 
 /// A single process observation for one tick.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct ResourceSample {
     pub pid: u32,
     pub ppid: u32,
@@ -36,6 +36,11 @@ pub struct ResourceSample {
     pub gpu_pct: f32,
     pub vram_bytes: u64,
     pub gpu_index: Option<u32>,
+    /// Executable basename, e.g. `claude` (used for signature matching).
+    pub exe_name: String,
+    /// Working directory, when readable (used to name a session).
+    pub cwd: Option<String>,
+    /// Full command line (kept for the detail/task column).
     pub cmd: String,
 }
 

@@ -1,111 +1,68 @@
-//! Process-to-agent attribution engine.
+//! Process-to-agent attribution.
+//!
+//! An *agent root* is a process that is itself an agent CLI (like `claude` or
+//! `ollama`). Matching is on the program (executable) name, not on substrings of
+//! the full path, so `~/.claude/...` plugin files and a `CursorUIViewService`
+//! system helper no longer masquerade as agents. GUI-app helper processes and
+//! system services are excluded from being roots. Non-root processes are
+//! attributed to a root by walking their parent tree (done in `app::build_agents`).
 
 use crate::model::{AgentKind, ResourceSample};
-use std::collections::HashMap;
 
-/// The result of attributing a process to an agent.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Attribution {
-    pub agent_id: String,
-    pub kind: AgentKind,
-    pub confidence: f32,
-}
-
-fn contains_any(cmd: &str, needles: &[&str]) -> Option<String> {
-    let c = cmd.to_lowercase();
-    needles
-        .iter()
-        .find(|n| c.contains(*n))
-        .map(|s| (*s).to_string())
-}
-
-const RENDER: &[&str] = &["comfyui", "sd-webui", "a1111"];
-const TRAIN: &[&str] = &["kohya", "accelerate", "train"];
-const INFER: &[&str] = &["ollama", "vllm", "llama", "whisper"];
-const CODING: &[&str] = &["claude", "codex", "cursor", "aider", "goose"];
-
-/// Infer the kind of work from a command line.
-pub fn kind_from_cmd(cmd: &str) -> AgentKind {
-    if contains_any(cmd, RENDER).is_some() {
-        AgentKind::Render
-    } else if contains_any(cmd, TRAIN).is_some() {
-        AgentKind::Train
-    } else if contains_any(cmd, INFER).is_some() {
-        AgentKind::Infer
-    } else if contains_any(cmd, CODING).is_some() {
-        AgentKind::Coding
-    } else {
-        AgentKind::Unknown
+/// Known agent CLIs, matched by exact program (executable) name.
+pub fn cli_signature(exe: &str) -> Option<(AgentKind, &'static str)> {
+    match exe {
+        "claude" => Some((AgentKind::Coding, "claude")),
+        "aider" => Some((AgentKind::Coding, "aider")),
+        "codex" => Some((AgentKind::Coding, "codex")),
+        "goose" => Some((AgentKind::Coding, "goose")),
+        "ollama" => Some((AgentKind::Infer, "ollama")),
+        "vllm" => Some((AgentKind::Infer, "vllm")),
+        "llama-server" | "llama-cli" => Some((AgentKind::Infer, "llama.cpp")),
+        _ => None,
     }
 }
 
-/// Derive a stable short agent id from a command line and its kind.
-fn id_from_cmd(cmd: &str, kind: AgentKind) -> String {
-    let needles = match kind {
-        AgentKind::Render => RENDER,
-        AgentKind::Train => TRAIN,
-        AgentKind::Infer => INFER,
-        AgentKind::Coding => CODING,
-        AgentKind::Unknown => return "unassigned".into(),
-    };
-    contains_any(cmd, needles).unwrap_or_else(|| "unassigned".into())
+/// True for processes that must never be an agent root: GUI-app helper
+/// processes (Electron / `.app` bundles) and macOS system services.
+pub fn is_excluded(sample: &ResourceSample) -> bool {
+    let c = &sample.cmd;
+    c.contains(".app/Contents/") || c.contains("/System/Library/")
 }
 
-/// Attribute a single process to an agent using layered heuristics:
-/// explicit env tag (1.0) > cmdline signature (0.8) > parent-tree
-/// inheritance (0.6) > unassigned (0.0). Port-map attribution is a later
-/// refinement and is not yet wired into this signature.
-pub fn attribute(
-    sample: &ResourceSample,
-    by_pid: &HashMap<u32, ResourceSample>,
-    env_tag: Option<&str>,
-) -> Attribution {
-    // 1. Explicit env tag wins.
+/// If this process is the root of an agent, return its `(kind, tool)`.
+///
+/// An explicit `AGENT_ID` env tag forces attribution regardless of program name.
+pub fn agent_root(sample: &ResourceSample, env_tag: Option<&str>) -> Option<(AgentKind, String)> {
     if let Some(tag) = env_tag
         && !tag.is_empty()
     {
-        return Attribution {
-            agent_id: tag.to_string(),
-            kind: kind_from_cmd(&sample.cmd),
-            confidence: 1.0,
-        };
+        let kind = cli_signature(&sample.exe_name.to_lowercase())
+            .map(|(k, _)| k)
+            .unwrap_or(AgentKind::Unknown);
+        return Some((kind, tag.to_string()));
     }
 
-    // 2. Cmdline signature.
-    let kind = kind_from_cmd(&sample.cmd);
-    if kind != AgentKind::Unknown {
-        return Attribution {
-            agent_id: id_from_cmd(&sample.cmd, kind),
-            kind,
-            confidence: 0.8,
-        };
+    if is_excluded(sample) {
+        return None;
     }
 
-    // 3. Parent-tree inheritance: walk up to an attributable ancestor.
-    let mut cur = sample.ppid;
-    let mut hops = 0;
-    while cur != 0 && hops < 32 {
-        match by_pid.get(&cur) {
-            Some(parent) => {
-                let pk = kind_from_cmd(&parent.cmd);
-                if pk != AgentKind::Unknown {
-                    return Attribution {
-                        agent_id: id_from_cmd(&parent.cmd, pk),
-                        kind: pk,
-                        confidence: 0.6,
-                    };
-                }
-                cur = parent.ppid;
-                hops += 1;
-            }
-            None => break,
+    let exe = sample.exe_name.to_lowercase();
+    if let Some((kind, tool)) = cli_signature(&exe) {
+        return Some((kind, tool.to_string()));
+    }
+
+    // Python-launched frameworks: match on args, but only for python-ish exes so
+    // an arbitrary process mentioning "comfyui" in a path is not caught.
+    if exe.starts_with("python") || exe == "accelerate" || exe == "torchrun" {
+        let cmd = sample.cmd.to_lowercase();
+        if cmd.contains("comfyui") || cmd.contains("sd-webui") || cmd.contains("a1111") {
+            return Some((AgentKind::Render, "comfyui".to_string()));
+        }
+        if cmd.contains("kohya") || cmd.contains("train_network") {
+            return Some((AgentKind::Train, "kohya".to_string()));
         }
     }
 
-    // 4. Nothing matched.
-    Attribution {
-        agent_id: "unassigned".into(),
-        kind: AgentKind::Unknown,
-        confidence: 0.0,
-    }
+    None
 }

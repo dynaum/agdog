@@ -1,55 +1,96 @@
 use agdog::app::build_agents;
-use agdog::model::{AgentKind, AgentState, ResourceSample};
+use agdog::model::{AgentKind, ResourceSample};
 use std::collections::HashMap;
 
-fn s(pid: u32, ppid: u32, cmd: &str, cpu: f32, rss: u64) -> ResourceSample {
+fn proc(pid: u32, ppid: u32, exe: &str, cmd: &str, cpu: f32, rss: u64) -> ResourceSample {
     ResourceSample {
         pid,
         ppid,
         cpu_pct: cpu,
         rss_bytes: rss,
-        gpu_pct: 0.0,
-        vram_bytes: 0,
-        gpu_index: None,
+        exe_name: exe.to_string(),
         cmd: cmd.to_string(),
+        ..Default::default()
     }
 }
 
 #[test]
-fn groups_by_agent_id_and_sums_metrics() {
+fn child_processes_roll_into_their_agent_root() {
     let samples = vec![
-        s(10, 1, "python comfyui/main.py", 30.0, 1_000_000_000),
-        s(11, 10, "python comfyui worker", 10.0, 500_000_000),
-        s(20, 1, "some random daemon", 1.0, 100_000_000),
+        proc(
+            100,
+            1,
+            "claude",
+            "claude --enable-auto-mode",
+            30.0,
+            1_000_000_000,
+        ),
+        proc(101, 100, "node", "node mcp-server.cjs", 5.0, 300_000_000), // child of claude
+        proc(102, 101, "python", "python chroma-mcp", 2.0, 200_000_000), // grandchild
+        proc(
+            900,
+            1,
+            "ollama",
+            "/opt/homebrew/opt/ollama/bin/ollama serve",
+            1.0,
+            500_000_000,
+        ),
+        proc(950, 1, "gamed", "/usr/libexec/gamed", 1.0, 100_000_000), // unrelated
     ];
     let agents = build_agents(&samples, &[], &HashMap::new(), 1, 0.0);
 
-    let comfy = agents
+    let claude = agents
         .iter()
-        .find(|a| a.id == "comfyui")
-        .expect("comfyui group");
-    assert_eq!(comfy.kind, AgentKind::Render);
-    assert!((comfy.cpu_pct - 40.0).abs() < 1e-3);
-    assert_eq!(comfy.mem_bytes, 1_500_000_000);
-    assert!(comfy.pids.contains(&10) && comfy.pids.contains(&11));
+        .find(|a| a.id == "claude")
+        .expect("claude agent");
+    assert_eq!(claude.kind, AgentKind::Coding);
+    assert!(claude.pids.contains(&100));
+    assert!(claude.pids.contains(&101));
+    assert!(claude.pids.contains(&102));
+    assert!((claude.cpu_pct - 37.0).abs() < 1e-3);
 
-    assert!(agents.iter().any(|a| a.id == "unassigned"));
+    assert!(agents.iter().any(|a| a.id == "ollama"));
+    assert!(
+        agents
+            .iter()
+            .any(|a| a.id == "unassigned" && a.pids.contains(&950))
+    );
 }
 
 #[test]
-fn active_group_classifies_working() {
-    let samples = vec![s(10, 1, "python comfyui/main.py", 50.0, 1_000_000_000)];
+fn parallel_sessions_get_distinct_ids_by_cwd() {
+    let mut a = proc(100, 1, "claude", "claude", 10.0, 0);
+    a.cwd = Some("/Users/x/dev/agdog".to_string());
+    let mut b = proc(200, 1, "claude", "claude", 10.0, 0);
+    b.cwd = Some("/Users/x/dev/site".to_string());
+    let agents = build_agents(&[a, b], &[], &HashMap::new(), 1, 0.0);
+
+    assert!(agents.iter().any(|x| x.id == "claude:agdog"));
+    assert!(agents.iter().any(|x| x.id == "claude:site"));
+    assert!(agents.iter().all(|x| x.id != "claude"));
+}
+
+#[test]
+fn gui_and_system_processes_never_become_agents() {
+    let samples = vec![
+        proc(
+            100,
+            1,
+            "Claude",
+            "/Applications/Claude.app/Contents/MacOS/Claude",
+            5.0,
+            0,
+        ),
+        proc(
+            101,
+            100,
+            "Claude Helper",
+            "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper --type=renderer",
+            5.0,
+            0,
+        ),
+    ];
     let agents = build_agents(&samples, &[], &HashMap::new(), 1, 0.0);
-    let comfy = agents.iter().find(|a| a.id == "comfyui").unwrap();
-    assert_eq!(comfy.state, AgentState::Working);
-}
-
-#[test]
-fn state_persists_across_ticks_and_accumulates_time() {
-    let samples = vec![s(10, 1, "python comfyui/main.py", 50.0, 1_000_000_000)];
-    let first = build_agents(&samples, &[], &HashMap::new(), 1, 0.0);
-    let second = build_agents(&samples, &first, &HashMap::new(), 1, 0.0);
-    let comfy = second.iter().find(|a| a.id == "comfyui").unwrap();
-    assert_eq!(comfy.state, AgentState::Working);
-    assert_eq!(comfy.since_secs, 1); // one tick of continuous Working
+    assert!(agents.iter().all(|a| a.id != "claude"));
+    assert!(agents.iter().any(|a| a.id == "unassigned"));
 }

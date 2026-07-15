@@ -74,7 +74,10 @@ agdog                      # live monitor
 agdog --interval 2         # refresh every 2 seconds
 agdog --gpu-hourly 2.50    # derive per-agent cost at $2.50 / GPU-hour
 agdog watch                # subscribe to the event socket, print JSON events
+agdog agents               # print the detected agents once and exit
 ```
+
+agdog identifies agents by their **program name**, not path substrings, so it separates real CLIs (each `claude` session, `ollama`, `aider`, ...) from GUI apps and system services. Parallel sessions are named by their project directory (`claude:myproject`); child processes (node, MCP servers) roll into their session; everything else lands in one `unassigned` row.
 
 Keys inside the TUI:
 
