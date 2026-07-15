@@ -47,13 +47,20 @@ State colors tell the story at a glance: 🟢 working · ⚪ idle · 🟡 stuck 
 brew install dynaum/tap/agdog
 ```
 
+**Scoop** (Windows):
+
+```powershell
+scoop bucket add dynaum https://github.com/dynaum/scoop-bucket
+scoop install agdog
+```
+
 **From source** (requires Rust 1.85+ for edition 2024):
 
 ```bash
 cargo install --git https://github.com/dynaum/agdog
 ```
 
-Prebuilt binaries for macOS (arm64 and x86_64) and Linux are attached to every [release](https://github.com/dynaum/agdog/releases).
+Prebuilt binaries for macOS (arm64 and x86_64), Linux, and Windows are attached to every [release](https://github.com/dynaum/agdog/releases).
 
 ## Quick start
 
@@ -64,7 +71,8 @@ agdog
 That's it. agdog detects your machine and shows **real numbers automatically**, no flags, no sudo:
 
 - **Mac** — live GPU utilization and unified memory via IOKit.
-- **Linux with an NVIDIA GPU** — per-process VRAM and utilization via NVML.
+- **Linux / Windows with an NVIDIA GPU** — per-process VRAM and utilization via NVML.
+- **Windows (any GPU)** — VRAM via DXGI and utilization via PDH counters.
 - **Anywhere else** — a mock GPU keeps the view alive so the tool still runs.
 
 ## Usage
@@ -113,11 +121,12 @@ $ agdog watch
 
 ## Backends
 
-| Backend       | Selected on      | What you get |
-|---------------|------------------|--------------|
-| Apple Silicon | macOS (auto)     | GPU utilization via IOKit `ioreg` + unified memory via sysinfo. No sudo. |
-| NVIDIA        | Linux (auto)     | Per-process VRAM and utilization via NVML (runtime driver load). |
-| Mock          | fallback         | Deterministic fake GPUs when no real backend is present. |
+| Backend       | Selected on         | What you get |
+|---------------|---------------------|--------------|
+| Apple Silicon | macOS (auto)        | GPU utilization via IOKit `ioreg` + unified memory via sysinfo. No sudo. |
+| NVIDIA        | Linux / Windows (auto) | Per-process VRAM and utilization via NVML (runtime driver load). |
+| DXGI + PDH    | Windows (auto)      | Per-adapter VRAM via DXGI and utilization via PDH counters (any GPU). |
+| Mock          | fallback            | Deterministic fake GPUs when no real backend is present. |
 
 The backend is chosen by your OS at build time and falls back to the mock when the hardware is absent, so agdog always runs and always shows the right numbers for the host.
 
