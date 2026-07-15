@@ -1,3 +1,6 @@
+// The event socket is Unix-only for now; this test does not apply on Windows.
+#![cfg(unix)]
+
 use agdog::model::{AgentState, Event, EventKind};
 use agdog::socket::EventServer;
 use std::io::{BufRead, BufReader};

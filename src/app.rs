@@ -630,8 +630,9 @@ mod tests {
     fn tick_builds_agents_and_summary() {
         let mut app = App::new();
         app.tick();
+        // `all_agents` always has at least the `unassigned` bucket; the filtered
+        // `agents` view can be empty on a host with no agent CLIs (e.g. CI).
         assert!(!app.all_agents.is_empty());
-        assert!(!app.agents.is_empty());
         assert!(app.summary.total_mem > 0);
     }
 

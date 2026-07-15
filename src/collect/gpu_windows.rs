@@ -14,8 +14,8 @@ use windows::Win32::Graphics::Dxgi::{
 };
 use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
 use windows::Win32::System::Performance::{
-    PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE, PDH_HCOUNTER, PDH_HQUERY, PdhAddEnglishCounterW,
-    PdhCloseQuery, PdhCollectQueryData, PdhGetFormattedCounterArrayW, PdhOpenQueryW,
+    PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE, PdhAddEnglishCounterW, PdhCloseQuery,
+    PdhCollectQueryData, PdhGetFormattedCounterArrayW, PdhOpenQueryW,
 };
 use windows::core::{Interface, PCWSTR};
 
@@ -78,10 +78,10 @@ fn dxgi_adapters() -> Vec<(String, u64, u64)> {
             };
             index += 1;
 
-            let mut desc = DXGI_ADAPTER_DESC1::default();
-            if adapter1.GetDesc1(&mut desc).is_err() {
-                continue;
-            }
+            let desc: DXGI_ADAPTER_DESC1 = match adapter1.GetDesc1() {
+                Ok(d) => d,
+                Err(_) => continue,
+            };
 
             // Skip the Microsoft Basic Render (software) adapter.
             if (DXGI_ADAPTER_FLAG(desc.Flags as i32).0 & DXGI_ADAPTER_FLAG_SOFTWARE.0) != 0 {
@@ -121,7 +121,7 @@ fn dxgi_adapters() -> Vec<(String, u64, u64)> {
 /// Overall GPU utilization percent (0..100) via PDH engine counters.
 fn pdh_gpu_util() -> f32 {
     unsafe {
-        let mut query = PDH_HQUERY::default();
+        let mut query: isize = 0;
         if PdhOpenQueryW(PCWSTR::null(), 0, &mut query) != 0 {
             return 0.0;
         }
@@ -131,13 +131,13 @@ fn pdh_gpu_util() -> f32 {
     }
 }
 
-unsafe fn collect_gpu_util(query: PDH_HQUERY) -> Option<f32> {
+unsafe fn collect_gpu_util(query: isize) -> Option<f32> {
     unsafe {
         let path: Vec<u16> = "\\GPU Engine(*)\\Utilization Percentage\0"
             .encode_utf16()
             .collect();
 
-        let mut counter = PDH_HCOUNTER::default();
+        let mut counter: isize = 0;
         if PdhAddEnglishCounterW(query, PCWSTR(path.as_ptr()), 0, &mut counter) != 0 {
             return None;
         }
