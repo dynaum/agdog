@@ -1,8 +1,9 @@
-//! NVIDIA GPU backend via NVML. Default on Linux.
+//! NVIDIA GPU backend via NVML. Default on Linux and Windows.
 //!
-//! `nvml-wrapper` loads `libnvidia-ml` at runtime, so this compiles on any Linux
-//! host; `try_new` returns `None` when no NVIDIA driver/device is present, and
-//! `default_gpu_collector` falls back to the mock.
+//! `nvml-wrapper` loads the NVML library at runtime (`libnvidia-ml.so` on Linux,
+//! `nvml.dll` on Windows), so this compiles on any such host; `try_new` returns
+//! `None` when no NVIDIA driver/device is present and `default_gpu_collector`
+//! falls back to the mock (or the DXGI backend on Windows).
 
 use crate::collect::gpu::{GpuCollector, GpuSample};
 use nvml_wrapper::Nvml;

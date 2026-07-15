@@ -1,6 +1,6 @@
 [package]
 name = "agdog"
-version = "0.1.5"
+version = "0.2.0"
 edition = "2024"
 description = "Agent-aware terminal resource monitor: htop and nvitop fused, grouped by the agent that owns each process."
 license = "MIT"
@@ -16,7 +16,18 @@ serde_json = "1"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 
-# NVIDIA backend ships by default on Linux; it loads the driver at runtime and
-# falls back to the mock when no device is present. Not pulled in on macOS.
-[target.'cfg(target_os = "linux")'.dependencies]
+# NVIDIA backend ships by default on Linux and Windows; it loads the driver at
+# runtime (libnvidia-ml.so / nvml.dll) and falls back to the mock when no device
+# is present. Not pulled in on macOS.
+[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
 nvml-wrapper = "0.10"
+
+# DXGI (VRAM) + PDH (utilization) GPU backend for non-NVIDIA Windows GPUs.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_System_Performance",
+    "Win32_System_Com",
+] }

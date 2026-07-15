@@ -4,6 +4,18 @@ All notable changes to agdog are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and versions follow
 [SemVer](https://semver.org/).
 
+## [0.2.0] - 2026-07-14
+
+### Added
+- **Windows support.** Real GPU data via NVML (NVIDIA) and DXGI + PDH (VRAM and
+  utilization for any adapter). A Windows binary is built in the release
+  pipeline and distributed through a Scoop bucket (`scoop install agdog`).
+
+### Changed
+- Backends are selected by OS with no feature flags on all three platforms.
+- The event socket is Unix-only for now; on Windows it is stubbed (a loopback
+  transport is planned).
+
 ## [0.1.5] - 2026-07-14
 
 ### Added

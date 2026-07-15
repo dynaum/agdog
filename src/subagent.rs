@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 /// The Claude projects dir for a working directory, if it exists.
 fn transcript_dir(cwd: &str) -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
     // Claude encodes the cwd by replacing `/` and `.` with `-`.
     let encoded: String = cwd
         .chars()

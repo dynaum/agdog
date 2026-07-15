@@ -22,6 +22,8 @@ jobs:
             target: x86_64-apple-darwin
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -29,14 +31,22 @@ jobs:
         run: rustup target add ${{ matrix.target }}
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
-      - name: Package
+      - name: Package (unix)
+        if: runner.os != 'Windows'
         run: |
           tar -czf "agdog-${{ github.ref_name }}-${{ matrix.target }}.tar.gz" \
             -C "target/${{ matrix.target }}/release" agdog
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        run: |
+          Compress-Archive -Path "target/${{ matrix.target }}/release/agdog.exe" `
+            -DestinationPath "agdog-${{ github.ref_name }}-${{ matrix.target }}.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
-          path: agdog-*.tar.gz
+          path: |
+            agdog-*.tar.gz
+            agdog-*.zip
 
   release:
     name: Publish release
@@ -48,7 +58,7 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Checksums
-        run: (cd dist && sha256sum agdog-*.tar.gz > SHA256SUMS)
+        run: (cd dist && sha256sum agdog-* > SHA256SUMS)
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
