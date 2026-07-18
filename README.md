@@ -66,7 +66,7 @@ Prebuilt binaries are attached to every [release](https://github.com/dynaum/agdo
 | Platform | Targets |
 |----------|---------|
 | macOS    | `aarch64-apple-darwin`, `x86_64-apple-darwin` |
-| Linux    | `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` (glibc 2.35+), `x86_64-unknown-linux-musl` (static, Alpine) |
+| Linux    | `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` (glibc 2.34+, so Debian 12, Ubuntu 22.04, RHEL/Rocky 9 and Amazon Linux 2023 all work), `x86_64-unknown-linux-musl` (fully static, Alpine) |
 | Windows  | `x86_64-pc-windows-msvc` |
 
 Every archive is listed in the `SHA256SUMS` file published with the release.
