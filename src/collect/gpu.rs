@@ -21,11 +21,27 @@ pub trait GpuCollector {
     fn name(&self) -> &str;
 }
 
+/// Backend used when no real GPU is readable: reports nothing at all.
+///
+/// This is deliberately not the mock. A host with an AMD/Intel GPU, or an
+/// NVIDIA card whose driver failed to load, must show an empty GPU panel
+/// rather than fabricated devices that look like working hardware.
+pub struct NoGpu;
+
+impl GpuCollector for NoGpu {
+    fn sample(&mut self) -> Vec<GpuSample> {
+        Vec::new()
+    }
+
+    fn name(&self) -> &str {
+        "none"
+    }
+}
+
 /// Return the best available GPU backend for this build and host.
 ///
-/// Real backends (NVML, macOS) are wired in behind feature flags in later
-/// tasks; until one initializes successfully we always fall back to the mock,
-/// so the binary runs on any machine.
+/// Order: demo mock (opt-in), then the platform's real backend. When no real
+/// backend initializes we return `NoGpu`, never the mock.
 pub fn default_gpu_collector() -> Box<dyn GpuCollector> {
     // Demo/screenshot mode forces the mock GPU on any platform.
     if crate::demo::enabled() {
@@ -49,5 +65,26 @@ pub fn default_gpu_collector() -> Box<dyn GpuCollector> {
             return Box::new(win);
         }
     }
-    Box::new(MockGpu::new())
+    Box::new(NoGpu)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_gpu_reports_no_devices() {
+        let mut g = NoGpu;
+        assert!(g.sample().is_empty());
+        assert_eq!(g.name(), "none");
+    }
+
+    #[test]
+    fn default_backend_is_never_the_mock_outside_demo_mode() {
+        // Guards the core honesty property: fabricated GPU data may only ever
+        // appear when the user explicitly opted into demo mode.
+        if !crate::demo::enabled() {
+            assert_ne!(default_gpu_collector().name(), "mock");
+        }
+    }
 }

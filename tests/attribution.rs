@@ -87,3 +87,26 @@ fn cli_signature_maps_known_tools_only() {
     assert!(cli_signature("bun").is_none());
     assert!(cli_signature("node").is_none());
 }
+
+#[test]
+fn windows_exe_suffix_still_matches() {
+    // On Windows the executable basename carries `.exe`; without stripping it
+    // every agent falls into `unassigned` and the TUI looks empty.
+    assert_eq!(cli_signature("claude.exe").unwrap().0, AgentKind::Coding);
+    assert_eq!(cli_signature("ollama.exe").unwrap().0, AgentKind::Infer);
+    assert_eq!(cli_signature("llama-server.exe").unwrap().1, "llama.cpp");
+    assert!(cli_signature("node.exe").is_none());
+}
+
+#[test]
+fn windows_claude_process_is_a_coding_root() {
+    let s = proc(
+        100,
+        1,
+        "claude.exe",
+        r"C:\Users\me\AppData\Local\claude\claude.exe --enable-auto-mode",
+    );
+    let (kind, tool) = agent_root(&s, None).unwrap();
+    assert_eq!(kind, AgentKind::Coding);
+    assert_eq!(tool, "claude");
+}

@@ -31,7 +31,38 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install components
+        run: rustup component add clippy rustfmt
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
       - name: Build
         run: cargo build --all-targets
       - name: Test
         run: cargo test --all-targets
+
+  # Compile every extra release target on PRs so a musl or aarch64 breakage
+  # surfaces here rather than at tag time, when the release is already cut.
+  cross:
+    name: Cross-build ${{ matrix.target }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-gnu
+            apt: gcc-aarch64-linux-gnu
+            linker: aarch64-linux-gnu-gcc
+          - target: x86_64-unknown-linux-musl
+            apt: musl-tools
+    env:
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.linker }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross toolchain
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.apt }}
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}

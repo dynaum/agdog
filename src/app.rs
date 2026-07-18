@@ -158,6 +158,17 @@ impl App {
         }
     }
 
+    /// Name of the live GPU backend (`nvml`, `macos`, `windows`, `mock`).
+    pub fn gpu_backend(&self) -> &str {
+        self.gpu.name()
+    }
+
+    /// True when the GPU numbers on screen are synthetic rather than read from
+    /// real hardware, so the UI is able to say so instead of silently lying.
+    pub fn gpu_is_synthetic(&self) -> bool {
+        self.gpu_backend() == "mock"
+    }
+
     /// Rebuild the visible `agents` from `all_agents` applying the current
     /// filter and sort. Cheap; called on tick and on key changes.
     fn refresh_view(&mut self) {
@@ -366,11 +377,14 @@ impl Default for App {
 }
 
 /// A short session label for a root: the working-directory basename, or the pid.
+///
+/// Splits on both separators so a Windows cwd (`C:\Users\me\proj`) yields
+/// `proj` rather than the whole path.
 fn session_label(sample: &ResourceSample) -> String {
     sample
         .cwd
         .as_deref()
-        .and_then(|c| c.rsplit('/').find(|s| !s.is_empty()))
+        .and_then(|c| c.rsplit(['/', '\\']).find(|s| !s.is_empty()))
         .map(|s| s.to_string())
         .unwrap_or_else(|| sample.pid.to_string())
 }
@@ -681,17 +695,55 @@ mod tests {
         assert!(app.summary.total_mem > 0);
     }
 
+    /// Seed `all_agents` directly so filtering tests do not depend on whether
+    /// the host running them happens to have agent CLIs alive (CI does not).
+    fn app_with_agents(ids: &[&str]) -> App {
+        let mut app = App::new();
+        app.all_agents = ids
+            .iter()
+            .map(|id| Agent {
+                id: (*id).to_string(),
+                ..Default::default()
+            })
+            .collect();
+        app.refresh_view();
+        app
+    }
+
     #[test]
     fn others_hidden_by_default_and_toggle_with_a() {
-        let mut app = App::new();
-        app.tick();
+        let mut app = app_with_agents(&["claude:proj", "unassigned"]);
         assert!(!app.show_unassigned);
         assert!(app.agents.iter().all(|a| a.id != "unassigned"));
         app.on_key(KeyCode::Char('a'));
         assert!(app.show_unassigned);
+        assert!(app.agents.iter().any(|a| a.id == "unassigned"));
         // j/k must never panic regardless of how many agents are visible.
         app.on_key(KeyCode::Char('j'));
         app.on_key(KeyCode::Char('k'));
+    }
+
+    #[test]
+    fn unassigned_shows_when_no_real_agents_exist() {
+        // The agent-less host fallback: rather than an empty table, show the
+        // process list even though `show_unassigned` is still false.
+        let app = app_with_agents(&["unassigned"]);
+        assert!(!app.show_unassigned);
+        assert!(app.agents.iter().any(|a| a.id == "unassigned"));
+    }
+
+    #[test]
+    fn session_label_uses_basename_on_both_separators() {
+        let with_cwd = |cwd: Option<&str>| ResourceSample {
+            pid: 42,
+            cwd: cwd.map(|c| c.to_string()),
+            ..Default::default()
+        };
+        assert_eq!(session_label(&with_cwd(Some("/Users/me/proj"))), "proj");
+        assert_eq!(session_label(&with_cwd(Some("/Users/me/proj/"))), "proj");
+        assert_eq!(session_label(&with_cwd(Some(r"C:\Users\me\proj"))), "proj");
+        // No cwd falls back to the pid.
+        assert_eq!(session_label(&with_cwd(None)), "42");
     }
 
     #[test]

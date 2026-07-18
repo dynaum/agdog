@@ -10,7 +10,11 @@
 use crate::model::{AgentKind, ResourceSample};
 
 /// Known agent CLIs, matched by exact program (executable) name.
+///
+/// A trailing `.exe` is stripped first: on Windows the executable basename is
+/// `claude.exe`, and matching it raw sends every agent to `unassigned`.
 pub fn cli_signature(exe: &str) -> Option<(AgentKind, &'static str)> {
+    let exe = exe.strip_suffix(".exe").unwrap_or(exe);
     match exe {
         "claude" => Some((AgentKind::Coding, "claude")),
         "aider" => Some((AgentKind::Coding, "aider")),

@@ -4,7 +4,7 @@ use crate::app::App;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 /// Render the footer into `area`.
@@ -23,11 +23,28 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     };
     let others = if app.show_unassigned { "on" } else { "off" };
     let text = format!(
-        "q quit · j/k move · s sort[{}] · a others:{} · / filter{}     agdog.sock: {subs} subscribers",
+        "q quit · j/k move · s sort[{}] · a others:{} · / filter{}     agdog.sock: {subs} subscribers  gpu:",
         app.sort.label(),
         others,
         filt,
     );
-    let p = Paragraph::new(Line::from(text)).style(Style::default().fg(Color::DarkGray));
+    // The backend name is always shown. Demo mode's synthetic backend is
+    // highlighted so fabricated GPU numbers are never mistaken for hardware.
+    let (backend, backend_style) = if app.gpu_is_synthetic() {
+        (
+            " mock (simulated)".to_string(),
+            Style::default().fg(Color::Yellow),
+        )
+    } else {
+        (
+            format!(" {}", app.gpu_backend()),
+            Style::default().fg(Color::DarkGray),
+        )
+    };
+
+    let p = Paragraph::new(Line::from(vec![
+        Span::styled(text, Style::default().fg(Color::DarkGray)),
+        Span::styled(backend, backend_style),
+    ]));
     frame.render_widget(p, area);
 }

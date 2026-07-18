@@ -11,7 +11,14 @@ use ratatui::widgets::{Block, Borders, Gauge};
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let gpus = &app.gpus;
     if gpus.is_empty() {
-        frame.render_widget(Block::default().borders(Borders::ALL).title(" GPUs "), area);
+        // Say why the panel is empty. "no readable GPU" covers both a machine
+        // with no discrete GPU and one whose driver did not load.
+        let title = if app.gpu_backend() == "none" {
+            " GPUs — no readable GPU "
+        } else {
+            " GPUs "
+        };
+        frame.render_widget(Block::default().borders(Borders::ALL).title(title), area);
         return;
     }
     let cols = if gpus.len() > 1 { 2 } else { 1 };

@@ -4,6 +4,45 @@ All notable changes to agdog are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and versions follow
 [SemVer](https://semver.org/).
 
+## [0.4.0] - 2026-07-18
+
+Cross-platform honesty and reach. agdog no longer shows numbers it did not
+measure, and Windows attribution works.
+
+### Changed
+- **A host with no readable GPU now reports exactly that**, instead of falling
+  back to the mock backend's four fabricated devices with invented utilization,
+  temperature, and wattage. This affected every non-NVIDIA Linux host and any
+  NVIDIA host whose driver failed to load: fake hardware was indistinguishable
+  from real. Fabricated GPU data now appears only under `AGDOG_DEMO=1`.
+- **The footer names the live GPU backend** (`macos`, `nvml`, `windows-dxgi`,
+  `none`), and labels demo mode's synthetic data `mock (simulated)`.
+
+### Fixed
+- **Windows attribution.** The executable basename is `claude.exe` on Windows,
+  and matching it against `claude` failed, so every agent fell into
+  `unassigned` and the TUI looked empty. A trailing `.exe` is now stripped.
+- **Windows session labels.** Working-directory basenames split on `\` as well
+  as `/`, so a session is `claude:proj` rather than `claude:C:\Users\me\proj`.
+- **`install.ps1` verifies its download** against the `SHA256SUMS` published
+  with the release before extracting. A mismatch, a missing entry, or an
+  unreachable checksum file aborts the install.
+- **CI on master.** A filter test asserted a condition true only on a host with
+  agent CLIs running, so it passed locally and failed on CI. It now seeds its
+  own agents rather than depending on the host.
+
+### Added
+- **Linux aarch64 and musl release binaries.** The glibc build moved from
+  `ubuntu-latest` to `ubuntu-22.04`, dropping the minimum glibc from 2.39 to
+  2.35: the previous binary would not run on Debian 12, Ubuntu 22.04, RHEL 9,
+  or Amazon Linux 2023. The musl build is fully static, for Alpine.
+- **Release smoke tests** run each binary the runner is able to execute, and CI
+  cross-compiles the aarch64 and musl targets on every PR so a break surfaces
+  before a tag is cut.
+- `rust-version = "1.85"`, so an older toolchain reports the MSRV instead of an
+  edition 2024 parse error.
+- Windows CI now runs `fmt` and `clippy`, matching the Linux and macOS jobs.
+
 ## [0.3.1] - 2026-07-15
 
 ### Fixed

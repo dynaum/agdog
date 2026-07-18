@@ -41,7 +41,7 @@ State colors tell the story at a glance: 🟢 working · ⚪ idle · 🟡 stuck 
 
 ## Install
 
-**Homebrew** (macOS and Linux):
+**Homebrew** (macOS arm64/x86_64, Linux x86_64):
 
 ```bash
 brew install dynaum/tap/agdog
@@ -61,7 +61,15 @@ Downloads the latest release, installs `agdog.exe` to `%LOCALAPPDATA%\agdog`, an
 cargo install --git https://github.com/dynaum/agdog
 ```
 
-Prebuilt binaries for macOS (arm64 and x86_64), Linux, and Windows are attached to every [release](https://github.com/dynaum/agdog/releases).
+Prebuilt binaries are attached to every [release](https://github.com/dynaum/agdog/releases):
+
+| Platform | Targets |
+|----------|---------|
+| macOS    | `aarch64-apple-darwin`, `x86_64-apple-darwin` |
+| Linux    | `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` (glibc 2.35+), `x86_64-unknown-linux-musl` (static, Alpine) |
+| Windows  | `x86_64-pc-windows-msvc` |
+
+Every archive is listed in the `SHA256SUMS` file published with the release.
 
 ## Quick start
 
@@ -112,7 +120,7 @@ By default the table shows only your agents; press `a` to also show the `unassig
 
 **Subagents** nest under their parent agent (a `SUB` count on the parent, indented `↳` rows). agdog finds them three ways: child agent *processes* via the tree, Claude Code Task sidechains read from the session transcript (`isSidechain`), and agents that report their subagents over the socket.
 
-**The socket API** is what makes agdog agent-native, not just a dashboard. agdog exposes a Unix socket that streams state-change events as JSON lines. An orchestrator, or the agents themselves, can subscribe and react to a stuck or runaway job instead of scraping the screen:
+**The socket API** is what makes agdog agent-native rather than a dashboard. agdog exposes a Unix socket that streams state-change events as JSON lines. An orchestrator, or the agents themselves, subscribe and react to a stuck or runaway job instead of scraping the screen. Unix only for now: on Windows the socket is stubbed and `agdog watch` exits with an unsupported error.
 
 ```bash
 $ agdog watch
@@ -127,17 +135,26 @@ $ agdog watch
 | Apple Silicon | macOS (auto)        | GPU utilization via IOKit `ioreg` + unified memory via sysinfo. No sudo. |
 | NVIDIA        | Linux / Windows (auto) | Per-process VRAM and utilization via NVML (runtime driver load). |
 | DXGI + PDH    | Windows (auto)      | Per-adapter VRAM via DXGI and utilization via PDH counters (any GPU). |
-| Mock          | fallback            | Deterministic fake GPUs when no real backend is present. |
+| None          | fallback            | No GPU panel. Shown when no real backend initializes. |
+| Mock          | `AGDOG_DEMO=1` only | Deterministic fake GPUs, for screenshots and the demo GIF. |
 
-The backend is chosen by your OS at build time and falls back to the mock when the hardware is absent, so agdog always runs and always shows the right numbers for the host.
+The backend is chosen by your OS at build time. When no real backend initializes (no discrete GPU, or a driver that failed to load) agdog reports **no readable GPU** rather than inventing devices. Fabricated GPU numbers appear only under `AGDOG_DEMO=1`, and the footer labels them `mock (simulated)`. The live backend name is always shown in the footer.
 
 ## Status
 
-Early but complete and runnable. Real process metrics work today; the mock GPU backend keeps the UI alive on any machine; the NVIDIA and macOS backends are wired behind their feature flags. Contributions and hardware reports welcome.
+Early but complete and runnable. Real process metrics work today on all three platforms.
+
+Verified per platform:
+
+- **macOS** — fully exercised. Attribution, per-core CPU, and GPU utilization via `ioreg` all read real data. Covered by CI.
+- **Linux** — process, CPU, and memory verified in CI. The NVML GPU path has no hardware coverage yet, so it is untested against a real card.
+- **Windows** — builds and passes tests in CI, but has no hardware coverage. The DXGI/PDH GPU backend is untested. The event socket is Unix-only, so `agdog watch` and socket-reported subagents are unavailable. Transcript-based subagent detection (Tier 2) does not yet resolve Windows paths.
+
+Contributions and hardware reports welcome, particularly from NVIDIA Linux and Windows hosts.
 
 ## Stack
 
-Rust · [ratatui](https://ratatui.rs) · [sysinfo](https://crates.io/crates/sysinfo) · [nvml-wrapper](https://crates.io/crates/nvml-wrapper). Single static binary, no runtime dependencies.
+Rust · [ratatui](https://ratatui.rs) · [sysinfo](https://crates.io/crates/sysinfo) · [nvml-wrapper](https://crates.io/crates/nvml-wrapper). A single binary with no install-time dependencies. The musl build is fully static. The glibc and macOS builds link the system libc, the NVIDIA backend loads the driver library at runtime, and the macOS backend shells out to `ioreg`.
 
 ## Changelog
 

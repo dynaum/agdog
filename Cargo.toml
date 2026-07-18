@@ -1,7 +1,8 @@
 [package]
 name = "agdog"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2024"
+rust-version = "1.85"
 description = "Agent-aware terminal resource monitor: htop and nvitop fused, grouped by the agent that owns each process."
 license = "MIT"
 repository = "https://github.com/dynaum/agdog"

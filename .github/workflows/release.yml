@@ -20,17 +20,41 @@ jobs:
             target: aarch64-apple-darwin
           - os: macos-14
             target: x86_64-apple-darwin
-          - os: ubuntu-latest
+          # Built on 22.04, not ubuntu-latest: the runner's glibc becomes the
+          # binary's minimum. 24.04 would set a 2.39 floor and exclude Debian
+          # 12, Ubuntu 22.04, RHEL 9 and Amazon Linux 2023. 22.04 gives 2.35.
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-gnu
+            apt: gcc-aarch64-linux-gnu
+            linker: aarch64-linux-gnu-gcc
+          # Fully static, for Alpine and other musl-based distros.
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-musl
+            apt: musl-tools
           - os: windows-latest
             target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.linker }}
     steps:
       - uses: actions/checkout@v4
+      - name: Install cross toolchain
+        if: matrix.apt != ''
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.apt }}
       - name: Add target
         run: rustup target add ${{ matrix.target }}
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
+      # Smoke tests skip the targets the runner cannot execute: aarch64 Linux
+      # on an x86 host, and the Intel macOS binary cross-built on Apple Silicon.
+      - name: Smoke test (unix)
+        if: runner.os != 'Windows' && matrix.target != 'aarch64-unknown-linux-gnu' && matrix.target != 'x86_64-apple-darwin'
+        run: ./target/${{ matrix.target }}/release/agdog --version
+      - name: Smoke test (windows)
+        if: runner.os == 'Windows'
+        run: .\target\${{ matrix.target }}\release\agdog.exe --version
       - name: Package (unix)
         if: runner.os != 'Windows'
         run: |
