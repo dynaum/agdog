@@ -18,32 +18,34 @@ use std::time::Duration;
 /// while looking like "no agents running".
 #[test]
 fn real_exe_process_is_attributed_as_an_agent() {
-    let src = std::env::current_exe().expect("current_exe");
     let dir = std::env::temp_dir().join("agdog-test-attr");
     std::fs::create_dir_all(&dir).expect("create temp dir");
     let fake = dir.join("claude.exe");
-    // Copy a binary that exits on its own so a leaked child cannot hang CI.
-    std::fs::copy(r"C:\Windows\System32\timeout.exe", &fake)
-        .or_else(|_| std::fs::copy(&src, &fake))
-        .expect("copy to claude.exe");
+    // ping keeps running with its output redirected and exits on its own, so a
+    // leaked child cannot hang CI. timeout.exe bails out when redirected.
+    std::fs::copy(r"C:\Windows\System32\PING.EXE", &fake).expect("copy ping to claude.exe");
 
     let mut child = std::process::Command::new(&fake)
-        .args(["/T", "20", "/NOBREAK"])
+        .args(["-n", "30", "127.0.0.1"])
         .stdout(std::process::Stdio::null())
         .spawn()
         .expect("spawn claude.exe");
-    std::thread::sleep(Duration::from_millis(1200));
 
+    // Poll rather than assume one refresh window catches the new process.
     let mut sys = SystemCollector::new();
-    let _ = sys.sample();
-    std::thread::sleep(Duration::from_millis(400));
-    let samples = sys.sample();
-
-    let found = samples.iter().find(|s| s.pid == child.id());
+    let mut found = None;
+    for _ in 0..10 {
+        std::thread::sleep(Duration::from_millis(400));
+        let samples = sys.sample();
+        if let Some(s) = samples.iter().find(|s| s.pid == child.id()) {
+            found = Some(s.clone());
+            break;
+        }
+    }
     let _ = child.kill();
     let _ = child.wait();
 
-    let s = found.expect("spawned claude.exe should appear in the process list");
+    let s = &found.expect("spawned claude.exe should appear in the process list");
     assert_eq!(s.exe_name.to_lowercase(), "claude.exe");
     let (kind, tool) = agent_root(s, None).expect("claude.exe must attribute as an agent root");
     assert_eq!(kind, AgentKind::Coding);
