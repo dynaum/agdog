@@ -124,7 +124,7 @@ By default the table shows only your agents; press `a` to also show the `unassig
 
 **Subagents** nest under their parent agent (a `SUB` count on the parent, indented `↳` rows). agdog finds them three ways: child agent *processes* via the tree, Claude Code Task sidechains read from the session transcript (`isSidechain`), and agents that report their subagents over the socket.
 
-**The socket API** is what makes agdog agent-native rather than a dashboard. agdog exposes a Unix socket that streams state-change events as JSON lines. An orchestrator, or the agents themselves, subscribe and react to a stuck or runaway job instead of scraping the screen. Unix only for now: on Windows the socket is stubbed and `agdog watch` exits with an unsupported error.
+**The socket API** is what makes agdog agent-native rather than a dashboard. agdog streams state-change events as JSON lines over the platform's local IPC primitive: a Unix socket at `$XDG_RUNTIME_DIR/agdog.sock`, or a named pipe at `\\.\pipe\agdog` on Windows. Both are access-controlled by the OS and neither opens a network port. The protocol is identical, so a client only needs the right name. An orchestrator, or the agents themselves, subscribe and react to a stuck or runaway job instead of scraping the screen:
 
 ```bash
 $ agdog watch
@@ -150,11 +150,11 @@ Early but complete and runnable. Real process metrics work today on all three pl
 
 Verified per platform:
 
-- **macOS** — fully exercised. Attribution, per-core CPU, and GPU utilization via `ioreg` all read real data. Covered by CI.
-- **Linux** — process, CPU, and memory verified in CI. The NVML GPU path has no hardware coverage yet, so it is untested against a real card.
-- **Windows** — builds and passes tests in CI, but has no hardware coverage. The DXGI/PDH GPU backend is untested. The event socket is Unix-only, so `agdog watch` and socket-reported subagents are unavailable. Transcript-based subagent detection (Tier 2) does not yet resolve Windows paths.
+- **macOS** — fully exercised. Attribution, per-core CPU, and GPU utilization via `ioreg` all read real data. Covered by CI. `AGENT_ID` tagging cannot work here (see above).
+- **Linux** — process, CPU, memory, and `AGENT_ID` attribution verified on real hosts. The NVML GPU path has no hardware coverage yet, so it is untested against a real card.
+- **Windows** — attribution, the cwd slug, the named-pipe socket, and DXGI adapter enumeration each run as tests on a real Windows host in CI. The remaining gap is GPU hardware: the runner has a virtual adapter, so VRAM and utilization numbers are unverified under real load, and per-process VRAM is not implemented.
 
-Contributions and hardware reports welcome, particularly from NVIDIA Linux and Windows hosts.
+Contributions and hardware reports welcome, particularly from NVIDIA Linux hosts and Windows machines with a real GPU.
 
 ## Stack
 
