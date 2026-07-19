@@ -42,6 +42,11 @@ pub struct ResourceSample {
     pub cwd: Option<String>,
     /// Full command line (kept for the detail/task column).
     pub cmd: String,
+    /// Value of the process's `AGENT_ID` environment variable, when set.
+    ///
+    /// The highest-confidence attribution signal: an agent that tags itself is
+    /// grouped under that name whatever its program is called.
+    pub agent_tag: Option<String>,
 }
 
 /// Where a subagent observation came from.

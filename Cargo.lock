@@ -9,6 +9,7 @@ dependencies = [
  "anyhow",
  "clap",
  "crossterm",
+ "libc",
  "nvml-wrapper",
  "ratatui",
  "serde",

@@ -10,7 +10,7 @@ use crate::model::{
 use crate::socket::{EventServer, socket_path};
 use crate::ui;
 use anyhow::Result;
-use crossterm::event::{self, Event as CEvent, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event as CEvent, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -19,6 +19,7 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use std::collections::{HashMap, HashSet};
 use std::io::stdout;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// Aggregate counts and totals shown in the summary strip.
@@ -123,7 +124,6 @@ pub struct App {
     pub interval: u64,
     /// GPU cost rate in dollars per hour (from `--gpu-hourly`).
     pub rate_per_hour: f64,
-    env_tags: HashMap<u32, String>,
     gpu: Box<dyn GpuCollector>,
     system: SystemCollector,
     /// Event broadcaster; None in tests and until `run` starts it.
@@ -150,7 +150,6 @@ impl App {
             cpu_history: Vec::new(),
             interval: 1,
             rate_per_hour: 0.0,
-            env_tags: HashMap::new(),
             gpu: default_gpu_collector(),
             system: SystemCollector::new(),
             server: None,
@@ -299,13 +298,7 @@ impl App {
         }
 
         let prev = std::mem::take(&mut self.all_agents);
-        self.all_agents = build_agents(
-            &samples,
-            &prev,
-            &self.env_tags,
-            self.interval,
-            self.rate_per_hour,
-        );
+        self.all_agents = build_agents(&samples, &prev, self.interval, self.rate_per_hour);
         self.attach_subagents();
         self.summary = summarize(
             &self.all_agents,
@@ -426,7 +419,6 @@ fn find_root(
 pub fn build_agents(
     samples: &[ResourceSample],
     prev: &[Agent],
-    env_tags: &HashMap<u32, String>,
     tick_secs: u64,
     rate_per_hour: f64,
 ) -> Vec<Agent> {
@@ -436,8 +428,7 @@ pub fn build_agents(
     // Pass 1: find agent roots (a process that is itself an agent CLI).
     let mut roots: HashMap<u32, (AgentKind, String)> = HashMap::new();
     for s in samples {
-        let tag = env_tags.get(&s.pid).map(|x| x.as_str());
-        if let Some((kind, tool)) = agent_root(s, tag) {
+        if let Some((kind, tool)) = agent_root(s, s.agent_tag.as_deref()) {
             roots.insert(s.pid, (kind, tool));
         }
     }
@@ -585,13 +576,68 @@ pub fn summarize(agents: &[Agent], cpu: f32, mem: (u64, u64), gpus: &[GpuSample]
     s
 }
 
+/// Put the terminal back into a usable state.
+///
+/// Safe to call more than once and from a panic hook, so every step ignores
+/// its error rather than unwinding a second time.
+fn restore_terminal() {
+    let _ = disable_raw_mode();
+    let _ = execute!(stdout(), LeaveAlternateScreen, crossterm::cursor::Show);
+}
+
+/// Set by the SIGTERM/SIGHUP handler so the loop exits through its normal
+/// path, restoring the terminal and dropping the socket server.
+static TERMINATE: AtomicBool = AtomicBool::new(false);
+
+#[cfg(unix)]
+extern "C" fn on_terminate(_sig: i32) {
+    // Storing to an atomic is async-signal-safe; the loop does the real work.
+    TERMINATE.store(true, Ordering::SeqCst);
+}
+
+/// Ask for a clean shutdown on SIGTERM/SIGHUP instead of dying mid-frame and
+/// leaving raw mode on plus a stale socket behind.
+#[cfg(unix)]
+fn install_signal_handlers() {
+    unsafe {
+        libc::signal(
+            libc::SIGTERM,
+            on_terminate as *const () as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGHUP,
+            on_terminate as *const () as libc::sighandler_t,
+        );
+    }
+}
+
+#[cfg(not(unix))]
+fn install_signal_handlers() {}
+
 /// Run the terminal UI loop until the user quits. Restores the terminal on exit.
 pub fn run(interval_secs: u64, rate_per_hour: f64) -> Result<()> {
-    enable_raw_mode()?;
-    let mut out = stdout();
-    execute!(out, EnterAlternateScreen)?;
-    let backend = CrosstermBackend::new(out);
-    let mut terminal = Terminal::new(backend)?;
+    // Installed before any terminal mode changes, so a failure or panic during
+    // setup still hands the user back a working shell.
+    let prev_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        restore_terminal();
+        prev_hook(info);
+    }));
+    install_signal_handlers();
+
+    let setup = || -> Result<Terminal<CrosstermBackend<std::io::Stdout>>> {
+        enable_raw_mode()?;
+        let mut out = stdout();
+        execute!(out, EnterAlternateScreen)?;
+        Ok(Terminal::new(CrosstermBackend::new(out))?)
+    };
+    let mut terminal = match setup() {
+        Ok(t) => t,
+        Err(e) => {
+            restore_terminal();
+            return Err(e);
+        }
+    };
     let mut app = App::new();
     app.interval = interval_secs.max(1);
     app.rate_per_hour = rate_per_hour;
@@ -609,22 +655,29 @@ pub fn run(interval_secs: u64, rate_per_hour: f64) -> Result<()> {
                 && let CEvent::Key(k) = event::read()?
                 && k.kind == KeyEventKind::Press
             {
-                app.on_key(k.code);
+                // Raw mode suppresses ISIG, so Ctrl+C arrives as a plain `c`
+                // keypress. Without this the user cannot interrupt at all, and
+                // in filter mode it would type a literal "c".
+                if k.modifiers.contains(KeyModifiers::CONTROL)
+                    && matches!(k.code, KeyCode::Char('c') | KeyCode::Char('C'))
+                {
+                    app.quit = true;
+                } else {
+                    app.on_key(k.code);
+                }
             }
             if last_tick.elapsed() >= tick_rate {
                 app.tick();
                 last_tick = Instant::now();
             }
-            if app.quit {
+            if app.quit || TERMINATE.load(Ordering::SeqCst) {
                 break;
             }
         }
         Ok(())
     })();
 
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
+    restore_terminal();
     res
 }
 

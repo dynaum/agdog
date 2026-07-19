@@ -50,6 +50,23 @@ impl SystemCollector {
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| p.name().to_string_lossy().into_owned());
                 let cwd = p.cwd().map(|c| c.to_string_lossy().into_owned());
+                // Tier 0 attribution: an agent that exports AGENT_ID names
+                // itself, whatever its executable is called.
+                //
+                // Platform support is uneven and this is best-effort by design.
+                // Linux exposes `/proc/<pid>/environ` for same-user processes,
+                // so it works there (verified: a binary named `mytool` with
+                // AGENT_ID=render-batch is attributed as `render-batch`).
+                // macOS refuses to hand over another process's environment at
+                // all, even a child of this very process, so it is always None
+                // there and attribution falls through to the name signature.
+                // Stays None rather than failing whenever it is unreadable.
+                let agent_tag = p.environ().iter().find_map(|kv| {
+                    kv.to_string_lossy()
+                        .strip_prefix("AGENT_ID=")
+                        .filter(|v| !v.is_empty())
+                        .map(|v| v.to_string())
+                });
                 ResourceSample {
                     pid: p.pid().as_u32(),
                     ppid: p.parent().map(|x| x.as_u32()).unwrap_or(0),
@@ -61,6 +78,7 @@ impl SystemCollector {
                     exe_name,
                     cwd,
                     cmd,
+                    agent_tag,
                 }
             })
             .collect()

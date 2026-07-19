@@ -112,7 +112,11 @@ By default the table shows only your agents; press `a` to also show the `unassig
 
 **Attribution** is the core idea. agdog maps each process to an agent with layered heuristics, highest confidence first:
 
-1. An explicit `AGENT_ID` environment tag.
+1. An explicit `AGENT_ID` environment tag. Export it and the process is grouped
+   under that name whatever the binary is called:
+   `AGENT_ID=render-batch ./my-worker`. **Linux only.** macOS refuses to expose
+   another process's environment, even a child of the reading process, so the
+   tag is invisible there and attribution falls through to the signature below.
 2. Command-line signatures (`comfyui`, `kohya`, `ollama`, `vllm`, `claude`, ...).
 3. Process-tree ancestry, so child workers inherit their parent's agent.
 
