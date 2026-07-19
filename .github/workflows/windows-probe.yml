@@ -1,7 +1,7 @@
 name: Windows probe
 
-# Temporary diagnostic. Reports what a real Windows host actually supports so
-# the remaining Windows work is scoped from evidence. Delete once folded in.
+# Temporary. Runs the Windows-only integration tests on a real Windows host
+# while they are being developed. Folded into ci.yml once green.
 on:
   workflow_dispatch:
   push:
@@ -12,15 +12,22 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run probe
-        run: cargo run --example windows_probe
-      - name: GPU adapters seen by Windows
+      - name: Windows platform tests
+        run: cargo test --test windows_platform -- --nocapture --test-threads=1
+      - name: Full suite
+        run: cargo test --all-targets
+      - name: agdog watch over the named pipe
         shell: pwsh
+        # Start the TUI headless so the pipe server is up, then subscribe.
         run: |
-          Get-CimInstance Win32_VideoController |
-            Select-Object Name, AdapterRAM, DriverVersion | Format-List
-      - name: PDH GPU counters present?
-        shell: pwsh
-        run: |
-          $c = (Get-Counter -ListSet '*GPU*' -ErrorAction SilentlyContinue)
-          if ($c) { $c.CounterSetName } else { Write-Host 'no GPU counter sets' }
+          $ErrorActionPreference = 'Continue'
+          cargo build --release
+          $tui = Start-Process -PassThru -FilePath ".\target\release\agdog.exe"
+          Start-Sleep -Seconds 4
+          $watch = Start-Process -PassThru -RedirectStandardOutput watch.log `
+            -FilePath ".\target\release\agdog.exe" -ArgumentList 'watch'
+          Start-Sleep -Seconds 8
+          Stop-Process -Id $watch.Id -Force -ErrorAction SilentlyContinue
+          Stop-Process -Id $tui.Id -Force -ErrorAction SilentlyContinue
+          Write-Host '--- watch.log ---'
+          if (Test-Path watch.log) { Get-Content watch.log } else { Write-Host '(no output)' }
