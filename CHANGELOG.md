@@ -4,6 +4,48 @@ All notable changes to agdog are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and versions follow
 [SemVer](https://semver.org/).
 
+## [0.5.0] - 2026-07-18
+
+Windows becomes a real platform, and the remaining silent-failure paths are
+closed. Every claim below is covered by a test running on a real Windows host
+in CI, not by cross-compilation.
+
+### Added
+- **The event socket works on Windows**, over a named pipe at
+  `\\.\pipe\agdog`. The transport was a no-op stub, so `agdog watch` and
+  socket-reported subagents were unavailable. The pipe's default ACL limits
+  access to the creating user and administrators, matching the Unix socket's
+  intent without opening a network port. The JSON protocol is unchanged.
+- **`AGENT_ID` attribution actually runs.** It was documented as the
+  highest-confidence tier, but the map backing it was never populated, so the
+  branch was unreachable on every platform. Export `AGENT_ID=render-batch` and
+  the process is grouped under that name whatever the binary is called.
+  **Linux only:** macOS refuses to expose another process's environment, even
+  a child of the reading process, so the tag is invisible there. Documented
+  rather than left looking broken.
+- **Windows platform tests** (`tests/windows_platform.rs`) covering real `.exe`
+  attribution, the cwd slug, a named-pipe round trip, and DXGI enumeration.
+
+### Fixed
+- **Transcript detection was broken on every platform, not just Windows.**
+  Claude Code slugs a cwd with `replace(/[^a-zA-Z0-9]/g, "-")`, a whitelist
+  rather than a separator swap. agdog replaced only `/` and `.`, so any path
+  containing `_`, a space, or any other non-alphanumeric never resolved and its
+  Tier 2 subagents silently vanished. Verified three ways, including a live run
+  in `/tmp/agdog_slug_test` which Claude Code stored as
+  `-private-tmp-agdog-slug-test`. Long paths truncated to 200 characters plus a
+  hash now resolve by prefix.
+- **A panic or `SIGTERM` left the terminal unusable**, still in raw mode and on
+  the alternate screen, with the panic message hidden. Both now restore the
+  terminal, and a failure during setup no longer leaks raw mode.
+- **Ctrl+C did nothing.** Raw mode suppresses ISIG, so it arrived as a plain
+  `c` keypress that nothing handled, and inside the filter it typed a literal
+  "c". There was no way to interrupt the TUI.
+- **GPU sampling blocked the UI thread on Windows** for 200ms every tick. The
+  PDH query was opened and closed per sample, so it had to manufacture an
+  interval for its rate counter. The query is now held open across ticks and
+  the refresh interval provides the spacing.
+
 ## [0.4.0] - 2026-07-18
 
 Cross-platform honesty and reach. agdog no longer shows numbers it did not

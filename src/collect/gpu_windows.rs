@@ -19,25 +19,56 @@ use windows::Win32::System::Performance::{
 };
 use windows::core::{Interface, PCWSTR};
 
+/// A PDH query kept open across ticks.
+///
+/// `\GPU Engine(*)\Utilization Percentage` is a rate counter: a value only
+/// exists relative to a previous collection. Opening a fresh query per sample
+/// meant paying a blocking 200ms sleep every tick just to manufacture that
+/// interval, on the same thread that draws the UI. Holding the query open lets
+/// the refresh interval itself provide the spacing, so sampling is immediate
+/// and the rate is measured over the real elapsed second.
+struct PdhQuery {
+    query: isize,
+    counter: isize,
+}
+
+impl Drop for PdhQuery {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = PdhCloseQuery(self.query);
+        }
+    }
+}
+
 /// DXGI + PDH GPU collector for Windows (non-NVIDIA or NVML-unavailable hosts).
-pub struct WindowsGpu;
+pub struct WindowsGpu {
+    /// None when the GPU engine counters are unavailable on this host, in
+    /// which case utilization reports 0 and VRAM still works.
+    util: Option<PdhQuery>,
+}
 
 impl WindowsGpu {
     /// Available whenever at least one hardware adapter is enumerable.
     pub fn try_new() -> Option<Self> {
         if dxgi_adapters().is_empty() {
-            None
-        } else {
-            Some(WindowsGpu)
+            return None;
         }
+        Some(WindowsGpu {
+            util: open_util_query(),
+        })
     }
 }
 
 impl GpuCollector for WindowsGpu {
     fn sample(&mut self) -> Vec<GpuSample> {
         // One overall utilization figure; applied to each adapter (fine for the
-        // common single-GPU case).
-        let util = pdh_gpu_util();
+        // common single-GPU case). Reads 0 on the very first tick, before a
+        // baseline collection exists to compute a rate against.
+        let util = self
+            .util
+            .as_ref()
+            .and_then(|q| unsafe { read_util(q) })
+            .unwrap_or(0.0);
         dxgi_adapters()
             .into_iter()
             .enumerate()
@@ -118,34 +149,38 @@ fn dxgi_adapters() -> Vec<(String, u64, u64)> {
     out
 }
 
-/// Overall GPU utilization percent (0..100) via PDH engine counters.
-fn pdh_gpu_util() -> f32 {
+/// Open the GPU engine utilization query once and take a baseline reading.
+///
+/// Returns None when the counter set is missing, which is normal on a host
+/// with no GPU driver exposing it.
+fn open_util_query() -> Option<PdhQuery> {
     unsafe {
         let mut query: isize = 0;
         if PdhOpenQueryW(PCWSTR::null(), 0, &mut query) != 0 {
-            return 0.0;
+            return None;
         }
-        let result = collect_gpu_util(query);
-        let _ = PdhCloseQuery(query);
-        result.unwrap_or(0.0)
-    }
-}
-
-unsafe fn collect_gpu_util(query: isize) -> Option<f32> {
-    unsafe {
         let path: Vec<u16> = "\\GPU Engine(*)\\Utilization Percentage\0"
             .encode_utf16()
             .collect();
-
         let mut counter: isize = 0;
         if PdhAddEnglishCounterW(query, PCWSTR(path.as_ptr()), 0, &mut counter) != 0 {
+            let _ = PdhCloseQuery(query);
             return None;
         }
-
+        // Baseline collection; the next one produces the first real rate.
         if PdhCollectQueryData(query) != 0 {
+            let _ = PdhCloseQuery(query);
             return None;
         }
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        Some(PdhQuery { query, counter })
+    }
+}
+
+/// Read utilization since the previous collection. Sums the per-engine
+/// instances (3D, Copy, Video, ...) and clamps to a single 0..100 figure.
+unsafe fn read_util(q: &PdhQuery) -> Option<f32> {
+    unsafe {
+        let (query, counter) = (q.query, q.counter);
         if PdhCollectQueryData(query) != 0 {
             return None;
         }

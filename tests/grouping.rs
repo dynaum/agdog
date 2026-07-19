@@ -1,6 +1,5 @@
 use agdog::app::build_agents;
 use agdog::model::{AgentKind, ResourceSample};
-use std::collections::HashMap;
 
 fn proc(pid: u32, ppid: u32, exe: &str, cmd: &str, cpu: f32, rss: u64) -> ResourceSample {
     ResourceSample {
@@ -37,7 +36,7 @@ fn child_processes_roll_into_their_agent_root() {
         ),
         proc(950, 1, "gamed", "/usr/libexec/gamed", 1.0, 100_000_000), // unrelated
     ];
-    let agents = build_agents(&samples, &[], &HashMap::new(), 1, 0.0);
+    let agents = build_agents(&samples, &[], 1, 0.0);
 
     let claude = agents
         .iter()
@@ -63,7 +62,7 @@ fn parallel_sessions_get_distinct_ids_by_cwd() {
     a.cwd = Some("/Users/x/dev/agdog".to_string());
     let mut b = proc(200, 1, "claude", "claude", 10.0, 0);
     b.cwd = Some("/Users/x/dev/site".to_string());
-    let agents = build_agents(&[a, b], &[], &HashMap::new(), 1, 0.0);
+    let agents = build_agents(&[a, b], &[], 1, 0.0);
 
     assert!(agents.iter().any(|x| x.id == "claude:agdog"));
     assert!(agents.iter().any(|x| x.id == "claude:site"));
@@ -77,7 +76,7 @@ fn child_agent_process_nests_as_subagent() {
     let mut child = proc(200, 100, "claude", "claude -p sub", 3.0, 500_000);
     child.cwd = Some("/x/dev/worker".to_string());
 
-    let agents = build_agents(&[parent, child], &[], &HashMap::new(), 1, 0.0);
+    let agents = build_agents(&[parent, child], &[], 1, 0.0);
 
     let p = agents
         .iter()
@@ -109,7 +108,7 @@ fn gui_and_system_processes_never_become_agents() {
             0,
         ),
     ];
-    let agents = build_agents(&samples, &[], &HashMap::new(), 1, 0.0);
+    let agents = build_agents(&samples, &[], 1, 0.0);
     assert!(agents.iter().all(|a| a.id != "claude"));
     assert!(agents.iter().any(|a| a.id == "unassigned"));
 }

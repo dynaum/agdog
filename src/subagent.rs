@@ -10,16 +10,52 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Longest slug Claude Code writes before truncating and appending a hash.
+const MAX_SLUG: usize = 200;
+
+/// Encode a working directory the way Claude Code names its project folder.
+///
+/// The rule is a whitelist, not a separator swap: every character outside
+/// `[a-zA-Z0-9]` becomes one `-`. Verified against the 2.1.x bundle, which
+/// does `path.replace(/[^a-zA-Z0-9]/g, "-")`.
+///
+/// This matters on two fronts. It is what makes Windows work at all, since
+/// `C:\Users\me\proj` has to become `C--Users-me-proj`. It also fixes Unix
+/// paths containing `_`, spaces, or any other non-alphanumeric, which the
+/// previous `/`-and-`.` rule left untouched, so `~/dev/kohya_ss` never
+/// resolved to its transcript.
+///
+/// The result is always ASCII, which lets callers slice it by byte safely.
+fn slug(cwd: &str) -> String {
+    cwd.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
+}
+
 /// The Claude projects dir for a working directory, if it exists.
 fn transcript_dir(cwd: &str) -> Option<PathBuf> {
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
-    // Claude encodes the cwd by replacing `/` and `.` with `-`.
-    let encoded: String = cwd
-        .chars()
-        .map(|c| if c == '/' || c == '.' { '-' } else { c })
-        .collect();
-    let dir = PathBuf::from(home).join(".claude/projects").join(encoded);
-    dir.is_dir().then_some(dir)
+    let projects = PathBuf::from(home).join(".claude").join("projects");
+    let slug = slug(cwd);
+
+    let exact = projects.join(&slug);
+    if exact.is_dir() {
+        return Some(exact);
+    }
+
+    // Over the limit Claude truncates to 200 chars and appends `-<hash>`, so
+    // match on the prefix rather than recomputing its hash. Slugs are ASCII,
+    // so slicing on a byte index cannot split a character.
+    if slug.len() > MAX_SLUG {
+        let prefix = format!("{}-", &slug[..MAX_SLUG]);
+        let found = fs::read_dir(&projects)
+            .ok()?
+            .flatten()
+            .find(|e| e.file_name().to_string_lossy().starts_with(prefix.as_str()))?;
+        let dir = found.path();
+        return dir.is_dir().then_some(dir);
+    }
+    None
 }
 
 /// The most recently modified `.jsonl` transcript in a projects dir.
@@ -120,6 +156,31 @@ mod tests {
         assert_eq!(subs.len(), 1);
         assert_eq!(subs[0].name, "explorer");
         assert_eq!(subs[0].source, SubSource::Transcript);
+    }
+
+    #[test]
+    fn slug_matches_claude_code_encoding() {
+        // Unix, the case that already worked.
+        assert_eq!(slug("/Users/me/dev/proj"), "-Users-me-dev-proj");
+        // A dot directory yields a double dash. Confirmed against a real
+        // local folder: `-Users-dynaum--claude-mem-observer-sessions`.
+        assert_eq!(slug("/Users/me/.claude-mem/x"), "-Users-me--claude-mem-x");
+        // Underscores map to `-` too. The old `/`-and-`.` rule got this
+        // wrong, so a path like ~/dev/kohya_ss never found its transcript.
+        assert_eq!(slug("/Users/me/dev/kohya_ss"), "-Users-me-dev-kohya-ss");
+        assert_eq!(slug("/Users/me/my project"), "-Users-me-my-project");
+        // Windows: drive colon and backslashes, and no leading dash.
+        assert_eq!(slug(r"C:\Users\me\proj"), "C--Users-me-proj");
+        assert_eq!(slug(r"E:\MatLab_HomeWork"), "E--MatLab-HomeWork");
+        // UNC paths start with two dashes and keep a trailing one.
+        assert_eq!(slug(r"\\diskstation\docker\"), "--diskstation-docker-");
+        // Case is preserved.
+        assert_eq!(slug("/Users/me/MoneyPrinter"), "-Users-me-MoneyPrinter");
+        // Non-ASCII becomes one dash per character. This exact pair (cwd and
+        // folder name) was observed on a real Windows 11 host.
+        assert_eq!(slug(r"D:\桌面\资料\matlab综合"), "D--------matlab--");
+        // Always ASCII, so byte slicing in `transcript_dir` is safe.
+        assert!(slug(r"D:\桌面\资料").is_ascii());
     }
 
     #[test]
