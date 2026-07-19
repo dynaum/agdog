@@ -1,0 +1,26 @@
+name: Windows probe
+
+# Temporary diagnostic. Reports what a real Windows host actually supports so
+# the remaining Windows work is scoped from evidence. Delete once folded in.
+on:
+  workflow_dispatch:
+  push:
+    branches: [windows-probe]
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run probe
+        run: cargo run --example windows_probe
+      - name: GPU adapters seen by Windows
+        shell: pwsh
+        run: |
+          Get-CimInstance Win32_VideoController |
+            Select-Object Name, AdapterRAM, DriverVersion | Format-List
+      - name: PDH GPU counters present?
+        shell: pwsh
+        run: |
+          $c = (Get-Counter -ListSet '*GPU*' -ErrorAction SilentlyContinue)
+          if ($c) { $c.CounterSetName } else { Write-Host 'no GPU counter sets' }
