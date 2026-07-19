@@ -41,6 +41,7 @@ fn real_exe_process_is_attributed_as_an_agent() {
 
     let found = samples.iter().find(|s| s.pid == child.id());
     let _ = child.kill();
+    let _ = child.wait();
 
     let s = found.expect("spawned claude.exe should appear in the process list");
     assert_eq!(s.exe_name.to_lowercase(), "claude.exe");

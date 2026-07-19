@@ -108,6 +108,7 @@ fn main() {
         None => println!("spawned process not found in samples (pid {})", child.id()),
     }
     let _ = child.kill();
+    let _ = child.wait();
 
     println!("\n=== TRANSCRIPT DIR (Tier 2) ===");
     let home = std::env::var("USERPROFILE").unwrap_or_default();

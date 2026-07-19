@@ -145,6 +145,7 @@ mod imp {
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
     use std::thread;
+    use std::time::Duration;
     use windows::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
     use windows::Win32::Storage::FileSystem::{FILE_FLAGS_AND_ATTRIBUTES, PIPE_ACCESS_DUPLEX};
     use windows::Win32::System::Pipes::{
@@ -296,14 +297,49 @@ mod imp {
         Ok(SendHandle(handle))
     }
 
+    /// Drain inbound `Report` lines without ever blocking in `ReadFile`.
+    ///
+    /// Windows serializes I/O on a synchronous file object, so a blocking read
+    /// parked on this pipe also stalls `broadcast`'s write to the very same
+    /// pipe, and neither side makes progress. Peeking first means the read is
+    /// only issued when bytes are already buffered, so it returns at once and
+    /// leaves the write path free.
     fn read_reports(stream: File, reported: Reported) {
-        use std::io::{BufRead, BufReader};
-        let reader = BufReader::new(stream);
-        for line in reader.lines().map_while(Result::ok) {
-            if let Ok(rep) = serde_json::from_str::<Report>(&line)
-                && let Ok(mut g) = reported.lock()
-            {
-                g.insert(rep.agent_id, rep.subagents);
+        use std::io::Read;
+        use std::os::windows::io::AsRawHandle;
+        use windows::Win32::System::Pipes::PeekNamedPipe;
+
+        let handle = HANDLE(stream.as_raw_handle());
+        let mut stream = stream;
+        let mut pending = String::new();
+        let mut buf = [0u8; 8192];
+
+        loop {
+            let mut avail: u32 = 0;
+            let ok = unsafe { PeekNamedPipe(handle, None, 0, None, Some(&mut avail), None) };
+            if ok.is_err() {
+                return; // client disconnected
+            }
+            if avail == 0 {
+                thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+
+            let want = (avail as usize).min(buf.len());
+            match stream.read(&mut buf[..want]) {
+                Ok(0) => return,
+                Ok(n) => pending.push_str(&String::from_utf8_lossy(&buf[..n])),
+                Err(_) => return,
+            }
+
+            // Consume whole lines, keeping any partial tail for the next read.
+            while let Some(nl) = pending.find('\n') {
+                let line: String = pending.drain(..=nl).collect();
+                if let Ok(rep) = serde_json::from_str::<Report>(line.trim())
+                    && let Ok(mut g) = reported.lock()
+                {
+                    g.insert(rep.agent_id, rep.subagents);
+                }
             }
         }
     }

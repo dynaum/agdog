@@ -10,6 +10,8 @@ on:
 jobs:
   probe:
     runs-on: windows-latest
+    # A deadlock in the pipe code should fail fast, not idle for the default 6h.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Windows platform tests
