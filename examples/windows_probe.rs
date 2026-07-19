@@ -112,7 +112,11 @@ fn main() {
     println!("\n=== TRANSCRIPT DIR (Tier 2) ===");
     let home = std::env::var("USERPROFILE").unwrap_or_default();
     let projects = PathBuf::from(&home).join(".claude").join("projects");
-    println!("projects dir  = {:?} exists={}", projects, projects.is_dir());
+    println!(
+        "projects dir  = {:?} exists={}",
+        projects,
+        projects.is_dir()
+    );
     if let Ok(rd) = std::fs::read_dir(&projects) {
         for e in rd.flatten().take(20) {
             println!("  entry: {:?}", e.file_name());
